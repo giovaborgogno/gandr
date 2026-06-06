@@ -4,9 +4,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use gdiff::app::App;
 use gdiff::config::Config;
-use gdiff::diff::engine;
 use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::{CompareSpec, GitBackend};
+use gdiff::git::CompareSpec;
 use gdiff::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -14,10 +13,8 @@ use ratatui::Terminal;
 
 /// Build an `App` showing the uncommitted diff of a fixture.
 fn app_from(fx: &Fixture) -> App {
-    let backend = Git2Backend::open(fx.path()).unwrap();
-    let context = backend.context().unwrap();
-    let files = engine::build_diffs(&backend, &CompareSpec::Uncommitted, 3).unwrap();
-    App::new(Config::default(), context, CompareSpec::Uncommitted, files)
+    let backend = Box::new(Git2Backend::open(fx.path()).unwrap());
+    App::new(Config::default(), backend, CompareSpec::Uncommitted).unwrap()
 }
 
 /// Render the App to a text frame of the given size.
@@ -209,6 +206,19 @@ fn side_by_side_view_shows_two_columns() {
     let mut app = app_from(&fx);
     app.handle_key(key('s')); // switch to side-by-side
     insta::assert_snapshot!(frame(&app, 80, 12));
+}
+
+// ---- M5: compare picker ----
+
+#[test]
+fn compare_picker_overlay() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('c')); // open the compare picker
+    insta::assert_snapshot!(frame(&app, 70, 14));
 }
 
 #[test]

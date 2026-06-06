@@ -13,7 +13,7 @@
 - [x] M2 — Core TUI (unified)
 - [x] M3 — Delta-style rendering
 - [x] M4 — Tree + side-by-side
-- [ ] M5 — Compare picker + smart + PR
+- [x] M5 — Compare picker + smart + PR
 - [ ] M6 — Live watch + review state
 - [ ] M7 — DX polish (search, context expand, editor, theme, config, mouse)
 
@@ -112,10 +112,14 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] `s` side-by-side viewer with aligned line wrapping (rows expand to the taller cell).
 - [x] Unit tests for tree building + snapshot tests for tree + split view.
 
-### M5 — Compare picker + smart + PR
-- [ ] `c` compare-picker overlay; all `CompareSpec` variants wired through the backend.
-- [ ] Base-branch detection via merge-base; `--smart` fallback chain.
-- [ ] `--pr [N]` via `gh pr view --json`; header shows PR title/number.
+### M5 — Compare picker + smart + PR ✅
+- [x] `c` compare-picker overlay; all `CompareSpec` variants wired through git2_backend
+      (Uncommitted/Staged/WorkdirVs/Range/Commit).
+- [x] Base detection via merge-base (`detect_base`); `base::resolve` smart fallback chain.
+- [x] `--pr [N]` via `gh pr view` (tsv, title-last so tabs are safe); header shows PR title.
+- [x] CLI parsing (`<ref>`, `<ref>..<ref>`, `--staged`, `--pr`, `--smart`); Ctrl-C quits.
+- [x] Tests: cli parsing, all backend comparison kinds, detect_base, picker overlay snapshot.
+- Note: path scoping (`gdiff <path>`) deferred (ref/path disambiguation) — see backlog.
 
 ### M6 — Live watch + review state
 - [ ] notify + debouncer auto-refresh (working-tree comparisons), preserving scroll/selection.

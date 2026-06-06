@@ -1,8 +1,8 @@
 //! Application state, the event loop, and key dispatch.
 
 use crate::config::{Config, ViewMode};
-use crate::diff::FileDiff;
-use crate::git::{CompareSpec, RepoContext};
+use crate::diff::{engine, FileDiff};
+use crate::git::{base, CompareSpec, GitBackend, RepoContext};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
@@ -24,13 +24,39 @@ pub enum Focus {
     Diff,
 }
 
+/// What a compare-picker entry does when chosen.
+#[derive(Debug, Clone)]
+enum PickerAction {
+    Spec(CompareSpec),
+    /// Resolve the current branch's PR via `gh` on selection.
+    Pr,
+}
+
+/// One entry in the compare picker.
+#[derive(Debug, Clone)]
+pub struct PickerItem {
+    pub label: String,
+    action: PickerAction,
+}
+
+/// The compare-picker overlay state.
+pub struct Picker {
+    pub items: Vec<PickerItem>,
+    pub selected: usize,
+}
+
 /// The whole application state.
 pub struct App {
     config: Config,
+    backend: Box<dyn GitBackend>,
     view: ViewMode,
     focus: Focus,
     context: RepoContext,
     spec: CompareSpec,
+    /// Optional header label overriding the spec's (e.g. a PR title).
+    title: Option<String>,
+    /// Last error (e.g. a bad ref / failed `gh`), shown in the keybar.
+    error: Option<String>,
     files: Vec<FileDiff>,
     /// Index into `files` of the selected file (the one shown in the viewer).
     selected: usize,
@@ -44,40 +70,49 @@ pub struct App {
     tree_scroll: Cell<usize>,
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
+    /// The compare picker overlay, when open.
+    picker: Option<Picker>,
     should_quit: bool,
 }
 
 impl App {
-    pub fn new(
+    /// Build the app: opens the comparison via `backend` and computes its diff.
+    pub fn new(config: Config, backend: Box<dyn GitBackend>, spec: CompareSpec) -> Result<Self> {
+        Self::with_title(config, backend, spec, None)
+    }
+
+    /// Like [`App::new`] but with an explicit header title (e.g. a PR title).
+    pub fn with_title(
         config: Config,
-        context: RepoContext,
+        backend: Box<dyn GitBackend>,
         spec: CompareSpec,
-        files: Vec<FileDiff>,
-    ) -> Self {
+        title: Option<String>,
+    ) -> Result<Self> {
+        let context = backend.context()?;
+        let files = engine::build_diffs(backend.as_ref(), &spec, config.context_lines)?;
         let view = config.default_view;
-        let collapsed = HashSet::new();
-        // Start the cursor on the first file row (skipping leading directories).
-        let rows = tree::build_rows(&files, &collapsed);
-        let tree_cursor = rows
-            .iter()
-            .position(|r| r.file_index().is_some())
-            .unwrap_or(0);
-        let selected = rows.get(tree_cursor).and_then(Row::file_index).unwrap_or(0);
-        Self {
+
+        let mut app = Self {
             config,
+            backend,
             view,
             focus: Focus::Tree,
             context,
             spec,
+            title,
+            error: None,
             files,
-            selected,
+            selected: 0,
             scroll: 0,
-            collapsed,
-            tree_cursor,
+            collapsed: HashSet::new(),
+            tree_cursor: 0,
             tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
+            picker: None,
             should_quit: false,
-        }
+        };
+        app.reset_view();
+        Ok(app)
     }
 
     // ---- accessors used by the ui layer ----
@@ -125,15 +160,16 @@ impl App {
         let (add, del) = self.totals();
         let n = self.files.len();
         let files = if n == 1 { "file" } else { "files" };
-        format!(
-            "gdiff · {branch} · {} · {n} {files}  +{add} −{del}",
-            self.spec.label()
-        )
+        let label = self.title.clone().unwrap_or_else(|| self.spec.label());
+        format!("gdiff · {branch} · {label} · {n} {files}  +{add} −{del}")
     }
 
-    /// The contextual key hints at the bottom.
+    /// The contextual key hints at the bottom (or the last error, if any).
     pub fn keybar_line(&self) -> String {
-        "j/k move · Tab focus · n/p file · ]/[ hunk · ←/→ fold · s split · w word · q quit"
+        if let Some(err) = &self.error {
+            return format!("⚠ {err}");
+        }
+        "j/k move · Tab focus · n/p file · ]/[ hunk · c compare · s split · w word · q quit"
             .to_string()
     }
 
@@ -310,6 +346,104 @@ impl App {
         }
     }
 
+    // ---- comparison & picker ----
+
+    /// Reset selection/cursor/scroll to the first file after the file set changes.
+    fn reset_view(&mut self) {
+        let rows = self.tree_rows();
+        self.tree_cursor = rows
+            .iter()
+            .position(|r| r.file_index().is_some())
+            .unwrap_or(0);
+        self.selected = rows
+            .get(self.tree_cursor)
+            .and_then(Row::file_index)
+            .unwrap_or(0);
+        self.scroll = 0;
+        self.tree_scroll.set(0);
+    }
+
+    /// Switch the comparison and recompute the diff, reverting on failure.
+    fn set_spec(&mut self, spec: CompareSpec, title: Option<String>) {
+        match engine::build_diffs(self.backend.as_ref(), &spec, self.config.context_lines) {
+            Ok(files) => {
+                self.spec = spec;
+                self.title = title;
+                self.error = None;
+                self.files = files;
+                self.collapsed.clear();
+                self.reset_view();
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// The open compare picker, if any (for rendering).
+    pub fn picker(&self) -> Option<&Picker> {
+        self.picker.as_ref()
+    }
+
+    fn open_picker(&mut self) {
+        let mut items = vec![
+            PickerItem {
+                label: "Uncommitted (vs HEAD)".into(),
+                action: PickerAction::Spec(CompareSpec::Uncommitted),
+            },
+            PickerItem {
+                label: "Staged (index vs HEAD)".into(),
+                action: PickerAction::Spec(CompareSpec::Staged),
+            },
+        ];
+        if let Ok(Some(base)) = self.backend.detect_base(&self.config.base_branches) {
+            items.push(PickerItem {
+                label: "Branch vs base".into(),
+                action: PickerAction::Spec(CompareSpec::WorkdirVs(base)),
+            });
+        }
+        items.push(PickerItem {
+            label: "PR (current branch, via gh)".into(),
+            action: PickerAction::Pr,
+        });
+        self.picker = Some(Picker { items, selected: 0 });
+    }
+
+    fn picker_apply(&mut self) {
+        let Some(picker) = self.picker.take() else {
+            return;
+        };
+        let Some(item) = picker.items.into_iter().nth(picker.selected) else {
+            return;
+        };
+        match item.action {
+            PickerAction::Spec(spec) => self.set_spec(spec, None),
+            PickerAction::Pr => match base::resolve_pr(None) {
+                Ok(r) => self.set_spec(r.spec, r.title),
+                Err(e) => self.error = Some(e.to_string()),
+            },
+        }
+    }
+
+    /// Route a key to the open picker; returns whether it was handled.
+    fn picker_key(&mut self, key: KeyEvent) -> bool {
+        let Some(picker) = self.picker.as_mut() else {
+            return false;
+        };
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if picker.selected + 1 < picker.items.len() {
+                    picker.selected += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                picker.selected = picker.selected.saturating_sub(1);
+            }
+            KeyCode::Enter => self.picker_apply(),
+            KeyCode::Esc | KeyCode::Char('q') => self.picker = None,
+            _ => {}
+        }
+        true
+    }
+
     // ---- rendering & input ----
 
     pub fn render(&self, f: &mut Frame) {
@@ -321,11 +455,22 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
-        let half_page = (self.viewport.get() / 2).max(1);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // Ctrl-C always quits (even with the picker open), before `c` opens it.
+        if ctrl && key.code == KeyCode::Char('c') {
+            self.should_quit = true;
+            return;
+        }
+        // The compare picker, when open, captures all other keys.
+        if self.picker_key(key) {
+            return;
+        }
+        let half_page = (self.viewport.get() / 2).max(1);
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('c') => self.open_picker(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,
@@ -371,18 +516,16 @@ impl App {
     }
 }
 
-/// Open the repository at the current directory, compute the diff, and run the TUI.
-pub fn run(config: Config, spec: CompareSpec) -> Result<()> {
-    use crate::diff::engine;
+/// Open the repository at the current directory, resolve the comparison, and run.
+pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     use crate::git::git2_backend::Git2Backend;
-    use crate::git::GitBackend;
 
     let cwd = std::env::current_dir().context("get current directory")?;
     let backend = Git2Backend::open(&cwd)?;
-    let context = backend.context()?;
-    let files = engine::build_diffs(&backend, &spec, config.context_lines)?;
+    let smart = inv.smart || config.smart_compare;
+    let resolved = base::resolve(&backend, inv.spec, smart, &config.base_branches)?;
 
-    let mut app = App::new(config, context, spec, files);
+    let mut app = App::with_title(config, Box::new(backend), resolved.spec, resolved.title)?;
     let mut terminal = ratatui::try_init()?;
     let result = run_loop(&mut app, &mut terminal);
     ratatui::restore();

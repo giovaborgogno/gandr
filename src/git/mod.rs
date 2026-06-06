@@ -7,6 +7,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+pub mod base;
 pub mod git2_backend;
 
 /// What to compare. The bare `gdiff` default is [`CompareSpec::Uncommitted`].
@@ -105,4 +106,9 @@ pub trait GitBackend {
 
     /// Old and new contents for one file.
     fn file_contents(&self, spec: &CompareSpec, change: &FileChange) -> Result<FileBlobs>;
+
+    /// Detect a base for the current branch: the merge-base SHA between `HEAD`
+    /// and the first of `candidates` that exists and differs from `HEAD`.
+    /// `None` if no suitable base is found.
+    fn detect_base(&self, candidates: &[String]) -> Result<Option<String>>;
 }

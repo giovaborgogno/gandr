@@ -30,6 +30,8 @@ pub struct Config {
     pub smart_compare: bool,
     pub context_lines: usize,
     pub tab_width: usize,
+    /// Branches tried (in order) when detecting a base for smart comparison.
+    pub base_branches: Vec<String>,
 }
 
 impl Default for Config {
@@ -41,6 +43,7 @@ impl Default for Config {
             smart_compare: false,
             context_lines: 3,
             tab_width: 4,
+            base_branches: vec!["main".into(), "master".into(), "develop".into()],
         }
     }
 }

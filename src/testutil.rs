@@ -113,4 +113,19 @@ impl Fixture {
     pub fn file(&self, rel: &str) -> PathBuf {
         self.dir.path().join(rel)
     }
+
+    /// Create a branch at the current `HEAD` and check it out.
+    pub fn checkout_new_branch(&self, name: &str) -> &Self {
+        let head = self
+            .repo
+            .head()
+            .expect("head")
+            .peel_to_commit()
+            .expect("head commit");
+        self.repo.branch(name, &head, false).expect("create branch");
+        self.repo
+            .set_head(&format!("refs/heads/{name}"))
+            .expect("set head");
+        self
+    }
 }

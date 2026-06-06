@@ -4,7 +4,7 @@
 use gdiff::diff::engine;
 use gdiff::diff::LineKind;
 use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::{CompareSpec, Status};
+use gdiff::git::{CompareSpec, GitBackend, Status};
 use gdiff::testutil::Fixture;
 use std::path::Path;
 
@@ -12,8 +12,13 @@ const CTX: usize = 3;
 
 /// Build the uncommitted diffs for a fixture.
 fn diffs(fx: &Fixture) -> Vec<gdiff::diff::FileDiff> {
+    diffs_spec(fx, &CompareSpec::Uncommitted)
+}
+
+/// Build the diffs for a fixture under an arbitrary comparison.
+fn diffs_spec(fx: &Fixture, spec: &CompareSpec) -> Vec<gdiff::diff::FileDiff> {
     let backend = Git2Backend::open(fx.path()).unwrap();
-    engine::build_diffs(&backend, &CompareSpec::Uncommitted, CTX).unwrap()
+    engine::build_diffs(&backend, spec, CTX).unwrap()
 }
 
 fn texts(lines: &[gdiff::diff::Line], kind: LineKind) -> Vec<String> {
@@ -181,6 +186,81 @@ fn nearby_changes_merge_into_one_hunk() {
     assert_eq!(d.hunks.len(), 1);
     // The unchanged line9 between them is shown as context.
     assert!(texts(&d.hunks[0].lines, LineKind::Context).contains(&"line9".to_string()));
+}
+
+// ---- M5: comparison kinds ----
+
+#[test]
+fn staged_shows_only_staged_changes() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "STAGED\n");
+    fx.stage_all();
+    fx.write("a.txt", "STAGED then unstaged\n"); // further unstaged edit
+
+    let d = diffs_spec(&fx, &CompareSpec::Staged);
+    let f = d
+        .iter()
+        .find(|f| f.change.path == Path::new("a.txt"))
+        .unwrap();
+    // Staged view compares index (STAGED) vs HEAD, ignoring the later unstaged edit.
+    assert_eq!(texts(&f.hunks[0].lines, LineKind::Add), vec!["STAGED"]);
+}
+
+#[test]
+fn commit_range_shows_changes_between_two_commits() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "v1\n");
+    let c1 = fx.commit("c1");
+    fx.write("a.txt", "v2\n");
+    let c2 = fx.commit("c2");
+
+    let d = diffs_spec(&fx, &CompareSpec::Range(c1.to_string(), c2.to_string()));
+    let f = &d[0];
+    assert_eq!(texts(&f.hunks[0].lines, LineKind::Del), vec!["v1"]);
+    assert_eq!(texts(&f.hunks[0].lines, LineKind::Add), vec!["v2"]);
+}
+
+#[test]
+fn single_commit_shows_its_own_changes() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "v1\n");
+    fx.commit("c1");
+    fx.write("a.txt", "v2\n");
+    let c2 = fx.commit("c2");
+
+    let d = diffs_spec(&fx, &CompareSpec::Commit(c2.to_string()));
+    assert_eq!(texts(&d[0].hunks[0].lines, LineKind::Add), vec!["v2"]);
+}
+
+#[test]
+fn workdir_vs_ref_compares_against_a_branch() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "base\n");
+    fx.commit("base"); // on main
+    fx.checkout_new_branch("feature");
+    fx.write("a.txt", "feature\n");
+    fx.commit("feature change");
+
+    let d = diffs_spec(&fx, &CompareSpec::WorkdirVs("main".into()));
+    let f = &d[0];
+    assert_eq!(texts(&f.hunks[0].lines, LineKind::Del), vec!["base"]);
+    assert_eq!(texts(&f.hunks[0].lines, LineKind::Add), vec!["feature"]);
+}
+
+#[test]
+fn detect_base_finds_merge_base_with_main() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "base\n");
+    let base_commit = fx.commit("base"); // on main
+    fx.checkout_new_branch("feature");
+    fx.write("a.txt", "feat\n");
+    fx.commit("feat");
+
+    let backend = Git2Backend::open(fx.path()).unwrap();
+    let base = backend.detect_base(&["main".to_string()]).unwrap();
+    assert_eq!(base.as_deref(), Some(base_commit.to_string().as_str()));
 }
 
 #[test]

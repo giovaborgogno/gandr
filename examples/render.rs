@@ -6,9 +6,8 @@
 use anyhow::Result;
 use gdiff::app::App;
 use gdiff::config::Config;
-use gdiff::diff::engine;
 use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::{CompareSpec, GitBackend};
+use gdiff::git::CompareSpec;
 use gdiff::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -25,10 +24,8 @@ fn main() -> Result<()> {
     fx.write("README.md", "# demo\n\nnew line\n");
     fx.write("notes.txt", "a brand new file\n");
 
-    let backend = Git2Backend::open(fx.path())?;
-    let context = backend.context()?;
-    let files = engine::build_diffs(&backend, &CompareSpec::Uncommitted, 3)?;
-    let app = App::new(Config::default(), context, CompareSpec::Uncommitted, files);
+    let backend = Box::new(Git2Backend::open(fx.path())?);
+    let app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
 
     let mut terminal = Terminal::new(TestBackend::new(100, 24))?;
     terminal.draw(|f| app.render(f))?;

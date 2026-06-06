@@ -59,6 +59,46 @@ pub fn render(app: &App, f: &mut Frame) {
         )),
         keybar,
     );
+
+    if let Some(picker) = app.picker() {
+        render_picker(f, f.area(), picker);
+    }
+}
+
+/// Draw the compare-picker overlay centered over the frame.
+fn render_picker(f: &mut Frame, area: Rect, picker: &crate::app::Picker) {
+    let width = 40.min(area.width.saturating_sub(4)).max(10);
+    let height = (picker.items.len() as u16 + 2).min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    let block = Block::bordered()
+        .title("Compare against…")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup);
+    f.render_widget(ratatui::widgets::Clear, popup);
+    f.render_widget(block, popup);
+
+    let lines: Vec<Line> = picker
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let style = if i == picker.selected {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            Line::from(Span::styled(format!(" {} ", item.label), style))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The left panel: the compact file tree.
