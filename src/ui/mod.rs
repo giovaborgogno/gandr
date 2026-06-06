@@ -21,33 +21,25 @@ use ratatui::Frame;
 /// Width of the file tree panel, in columns.
 const TREE_WIDTH: u16 = 32;
 
-/// Key hints shown in the keybar (key, label).
+/// Essential key hints for the keybar (key, label). The full list lives in `?`,
+/// so this stays a single, uncluttered line that fits a narrow (half) terminal.
 const KEYBAR: &[(&str, &str)] = &[
-    ("j/k", "move"),
-    ("Tab", "focus"),
-    ("n/p", "file"),
     ("]/[", "hunk"),
-    ("c", "compare"),
-    ("b", "ref"),
-    ("o", "context"),
+    ("n/p", "file"),
     ("Space", "review"),
     ("s", "split"),
     ("/", "find"),
-    ("e", "edit"),
+    ("c", "compare"),
     ("?", "help"),
-    ("q", "quit"),
 ];
 
-/// Key hints for the Files tab.
+/// Essential key hints for the Files tab.
 const KEYBAR_FILES: &[(&str, &str)] = &[
-    ("j/k", "move"),
-    ("Tab", "focus"),
-    ("Enter", "open/expand"),
-    ("←/→", "collapse/expand"),
-    ("/", "search repo"),
+    ("Enter", "open"),
+    ("←/→", "fold"),
+    ("/", "search"),
     ("1", "diff"),
     ("?", "help"),
-    ("q", "quit"),
 ];
 
 /// Build the styled keybar line: keys highlighted, labels dim.
@@ -389,25 +381,24 @@ fn keybar_line(app: &App) -> Line<'static> {
 /// Draw the help overlay listing keybindings.
 fn render_help(f: &mut Frame, area: Rect) {
     const KEYS: &[(&str, &str)] = &[
-        ("j / k, ↑ / ↓", "move (tree) or scroll (diff)"),
-        ("Tab", "switch focus tree ↔ diff"),
-        ("n / p", "next / previous file"),
-        ("] / [", "next / previous hunk"),
-        (
-            "Enter, → / ←",
-            "expand/collapse tree; Enter on a file → diff; Enter in diff expands a fold",
-        ),
-        ("g / G, Ctrl-d/u", "top / bottom; half-page"),
-        ("s", "toggle unified / side-by-side"),
-        ("w", "toggle word-level highlight"),
-        ("o", "expand context (cycle 3→10→30→100)"),
-        ("Space", "mark file reviewed"),
-        ("c", "compare picker"),
-        ("b", "compare vs branch/tag (fuzzy)"),
-        ("/", "search in diff (n/N to navigate)"),
-        ("e", "open file in $EDITOR"),
-        ("r / a", "refresh / toggle auto-refresh"),
-        ("? / q", "this help / quit"),
+        ("j / k, ↑ / ↓", "move / scroll"),
+        ("Tab", "switch tree ↔ diff focus"),
+        ("n / p", "next / prev file"),
+        ("] / [", "next / prev hunk"),
+        ("g / G", "top / bottom"),
+        ("Ctrl-d / u", "half-page down / up"),
+        ("Enter", "open file · expand fold"),
+        ("→ / ←", "expand / collapse dir"),
+        ("s", "unified / side-by-side"),
+        ("w", "word-level highlight"),
+        ("o", "context window 3→10→30→100"),
+        ("Space", "mark reviewed"),
+        ("c / b", "compare · branch/tag picker"),
+        ("/", "find (n / N to navigate)"),
+        ("e", "open in $EDITOR"),
+        ("r / a", "refresh · auto-refresh"),
+        ("1 / 2", "Diff / Files tab"),
+        ("? / q", "help · quit"),
     ];
 
     // Clamp to the area so the popup always fits (no oversized Rect on tiny terminals).

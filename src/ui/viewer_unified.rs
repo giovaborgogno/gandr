@@ -28,7 +28,7 @@ pub(crate) fn gutter_width(full: &[DiffLine]) -> usize {
 /// The "⋯ N unchanged lines ⋯" marker shown for a collapsed fold; pressing Enter
 /// (with the diff focused) expands the one nearest the top of the viewport.
 pub(crate) fn fold_marker(hidden: usize, width: usize) -> Line<'static> {
-    let label = format!(" ⋯ {hidden} unchanged lines (Enter to expand) ⋯");
+    let label = format!(" ⋯ {hidden} unchanged lines · Enter to expand ⋯");
     let mut text = label.chars().take(width).collect::<String>();
     let used = text.chars().count();
     if used < width {

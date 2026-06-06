@@ -17,23 +17,12 @@ fn app_from(fx: &Fixture) -> App {
     App::new(Config::default(), backend, CompareSpec::Uncommitted).unwrap()
 }
 
-/// Redact the non-deterministic repo path shown in the tab bar (fixtures use
-/// random temp dirs), so snapshots are stable.
-fn redact(s: &str) -> String {
-    s.lines()
-        .map(|l| match l.find("Files [2]") {
-            Some(i) => format!("{}   <repo>", &l[..i + "Files [2]".len()]),
-            None => l.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Render the App to a text frame of the given size.
+/// Render the App to a text frame of the given size. The header shows the branch
+/// and comparison (not the random temp-dir path), so frames are deterministic.
 fn frame(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
-    redact(&terminal.backend().to_string())
+    terminal.backend().to_string()
 }
 
 fn key(c: char) -> KeyEvent {
@@ -75,7 +64,7 @@ fn render_buffer(app: &App, width: u16, height: u16) -> (String, String) {
 /// delta-style add/del backgrounds and word-level emphasis headlessly).
 fn styled_frame(app: &App, width: u16, height: u16) -> String {
     let (glyphs, bgs) = render_buffer(app, width, height);
-    format!("{}── backgrounds ──\n{bgs}", redact(&glyphs))
+    format!("{glyphs}── backgrounds ──\n{bgs}")
 }
 
 #[test]
