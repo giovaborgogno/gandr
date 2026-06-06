@@ -18,7 +18,7 @@ use anyhow::{Context as _, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -110,9 +110,10 @@ pub struct App {
     full_cache: RefCell<(Option<PathBuf>, Rc<Vec<DiffLine>>)>,
     /// Cached folded display rows, keyed by (path, base context, expand version).
     display_cache: RefCell<DisplayRows>,
-    /// Which folds (by full-line anchor) the user expanded, for the file at
-    /// `expanded_path`. Reset when the selected file or its content changes.
-    expanded_folds: HashSet<usize>,
+    /// Per-gap reveal state for the file at `expanded_path`: maps a fold's anchor
+    /// (its run start index) to how many lines the user has revealed from the top.
+    /// Reset when the selected file or its content changes.
+    expanded_folds: HashMap<usize, usize>,
     expanded_path: Option<PathBuf>,
     /// Bumped on each expand so the display cache recomputes.
     expanded_version: u64,
@@ -235,7 +236,7 @@ impl App {
             diff_hl: RefCell::new(DiffHighlight::default()),
             full_cache: RefCell::new((None, Rc::new(Vec::new()))),
             display_cache: RefCell::new(DisplayRows::default()),
-            expanded_folds: HashSet::new(),
+            expanded_folds: HashMap::new(),
             expanded_path: None,
             expanded_version: 0,
             picker: None,
@@ -462,7 +463,7 @@ impl App {
         }
         let full = self.full_lines();
         // Only apply expansions that belong to the currently selected file.
-        let empty = HashSet::new();
+        let empty = HashMap::new();
         let expanded = if self.expanded_path == path {
             &self.expanded_folds
         } else {
@@ -488,15 +489,20 @@ impl App {
         self.expanded_version = self.expanded_version.wrapping_add(1);
     }
 
-    /// Expand the fold nearest the top of the viewport (the gap the user is
-    /// looking at), revealing its hidden lines. Repeating reveals more gaps.
+    /// How many lines each `Enter` reveals from the top of the active fold.
+    const EXPAND_STEP: usize = 10;
+
+    /// Reveal more of the fold nearest the top of the viewport (the gap the user
+    /// is looking at): each call shows another [`Self::EXPAND_STEP`] lines from
+    /// its top. Repeating walks down the gap; once a gap is fully shown the next
+    /// call targets the following one.
     fn expand_active_fold(&mut self) {
         let rows = self.display_rows();
         let folds: Vec<(usize, usize)> = rows
             .iter()
             .enumerate()
             .filter_map(|(i, r)| match r {
-                DiffRow::Fold { start, .. } => Some((i, *start)),
+                DiffRow::Fold { anchor, .. } => Some((i, *anchor)),
                 DiffRow::Line(_) => None,
             })
             .collect();
@@ -516,7 +522,7 @@ impl App {
             self.expanded_path = path;
             self.expanded_folds.clear();
         }
-        self.expanded_folds.insert(anchor);
+        *self.expanded_folds.entry(anchor).or_insert(0) += Self::EXPAND_STEP;
         self.expanded_version = self.expanded_version.wrapping_add(1);
     }
 

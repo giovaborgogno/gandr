@@ -543,22 +543,34 @@ fn diff_shows_fold_marker_and_enter_expands_it() {
         folded < fulllen,
         "context should be folded ({folded} rows < {fulllen} lines)"
     );
-    let fold_count = |a: &App| {
+    use gdiff::diff::fold::DiffRow;
+    let line_rows = |a: &App| {
         a.display_rows()
             .iter()
-            .filter(|r| matches!(r, gdiff::diff::fold::DiffRow::Fold { .. }))
+            .filter(|r| matches!(r, DiffRow::Line(_)))
             .count()
     };
-    assert!(fold_count(&app) >= 1, "expected at least one fold marker");
+    let has_fold = |a: &App| {
+        a.display_rows()
+            .iter()
+            .any(|r| matches!(r, DiffRow::Fold { .. }))
+    };
+    assert!(has_fold(&app), "expected at least one fold marker");
 
-    // Focus the diff and press Enter to expand the fold nearest the top.
+    // Focus the diff and press Enter: a chunk of the active fold is revealed
+    // (incremental — a big gap shrinks but stays a fold).
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    let before = fold_count(&app);
+    let before = line_rows(&app);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-    let after = fold_count(&app);
+    let after = line_rows(&app);
     assert!(
-        after < before,
-        "Enter should expand a fold (folds {before} → {after})"
+        after > before,
+        "Enter should reveal more lines ({before} → {after})"
+    );
+    assert!(
+        after - before <= 10,
+        "reveal is incremental (≤ EXPAND_STEP), got {}",
+        after - before
     );
     // The rendered frame shows the marker (use a fresh, unexpanded app).
     let fresh = app_from(&fx);
