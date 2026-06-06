@@ -465,6 +465,38 @@ fn repo_search_jumps_to_result() {
     assert_eq!(app.browser().content_scroll(), 2);
 }
 
+#[test]
+fn files_content_search_keeps_query_and_navigates() {
+    let fx = Fixture::new();
+    // "needle" on lines 1 and 4.
+    fx.write(
+        "a.rs",
+        "let needle = 1;\nlet b = 2;\nlet c = 3;\nlet needle2 = 4;\n",
+    );
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    let root = app.context().root.clone();
+
+    app.handle_key(key('2')); // Files
+    app.handle_key(key('/')); // content search
+    for c in "needle".chars() {
+        app.handle_key(key(c));
+    }
+    run_pending_search(&mut app, &root);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // jump to first hit
+
+    // The query is kept so the preview highlights it and n/N can navigate.
+    assert_eq!(app.browser_query(), Some("needle"));
+    assert_eq!(app.browser().content_scroll(), 0); // first match: line 1
+    app.handle_key(key('n')); // → next match (line 4 → 0-based 3)
+    assert_eq!(app.browser().content_scroll(), 3);
+    app.handle_key(key('n')); // wraps back to the first
+    assert_eq!(app.browser().content_scroll(), 0);
+    // Switching to the Diff tab clears the preview highlight.
+    app.handle_key(key('1'));
+    assert_eq!(app.browser_query(), None);
+}
+
 // ---- M12 (diff viewer): multi-line syntax highlighting ----
 
 /// Drive the async highlight job to completion (no run_loop in tests), the same

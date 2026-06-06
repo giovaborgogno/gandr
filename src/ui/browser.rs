@@ -3,7 +3,7 @@
 
 use crate::app::{App, Focus};
 use crate::browser::EntryKind;
-use crate::highlight::{FgSpan, Highlighter};
+use crate::highlight::Highlighter;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -67,27 +67,6 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Plain syntax-highlighted spans for one line (foreground only, no diff bg).
-fn syntax_spans(text: &str, fg: &[FgSpan]) -> Vec<Span<'static>> {
-    if fg.is_empty() {
-        return vec![Span::raw(text.to_string())];
-    }
-    fg.iter()
-        .filter(|s| {
-            s.start < s.end
-                && s.end <= text.len()
-                && text.is_char_boundary(s.start)
-                && text.is_char_boundary(s.end)
-        })
-        .map(|s| {
-            Span::styled(
-                text[s.start..s.end].to_string(),
-                Style::default().fg(s.color),
-            )
-        })
-        .collect()
-}
-
 fn render_content(app: &App, f: &mut Frame, area: Rect) {
     // Title the pane with the selected file's path (relative to the repo root).
     let title = app.browser().loaded().map(|l| {
@@ -130,6 +109,10 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     // highlight their visible lines per-render instead so selection stays instant.
     let hl = Highlighter::for_path(&loaded.path, app.theme_mode());
 
+    // Highlight content-search matches in the preview (after a repo content jump).
+    let query = app.browser_query().filter(|q| !q.is_empty());
+    let palette = crate::highlight::Palette::for_mode(app.theme_mode());
+
     let mut lines: Vec<Line> = Vec::new();
     for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
         let mut spans = vec![Span::styled(
@@ -146,7 +129,17 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
                 &fallback
             }
         };
-        spans.extend(syntax_spans(text, fg));
+        // Reuse the diff composer (no diff bg/word here) to get syntax fg plus
+        // the search-match highlight for free.
+        spans.extend(crate::highlight::compose::line_spans(
+            text,
+            crate::diff::LineKind::Context,
+            &[],
+            fg,
+            &palette,
+            false,
+            query,
+        ));
         lines.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(lines), content);

@@ -148,6 +148,9 @@ pub struct App {
     tab: Tab,
     /// Whether the left tree/list panel is shown (`z` toggles it for full-width).
     show_tree: bool,
+    /// Active content-search term for the Files preview (set when jumping to a
+    /// content hit): highlighted in the preview and navigable with n/N.
+    browser_query: Option<String>,
     /// The Files-tab repo browser.
     browser: Browser,
     /// Whether the help overlay is shown.
@@ -264,6 +267,7 @@ impl App {
             theme_mode: ThemeMode::Dark,
             tab: Tab::Diff,
             show_tree: true,
+            browser_query: None,
             browser,
             show_help: false,
             search: None,
@@ -1056,6 +1060,7 @@ impl App {
     fn open_repo_search(&mut self) {
         self.search_epoch += 1;
         self.pending_search = None;
+        self.browser_query = None; // a new search supersedes the old highlight
         let mode = SearchMode::Content;
         self.repo_search = Some(RepoSearch {
             query: String::new(),
@@ -1133,11 +1138,50 @@ impl App {
                 .get(rs.selected)
                 .map(|m| (root.join(&m.path), Some(m.line as usize))),
         });
+        // For a content hit, keep the query so the preview highlights it and n/N
+        // can step through its occurrences in the opened file.
+        let query = self.repo_search.as_ref().and_then(|rs| match rs.results {
+            SearchResults::Content(_) if !rs.query.is_empty() => Some(rs.query.clone()),
+            _ => None,
+        });
         if let Some((abs, line)) = target {
             self.browser.reveal(&abs, line);
+            self.browser_query = query;
             self.focus = Focus::Diff; // focus the content pane
             self.repo_search = None;
             self.pending_search = None;
+        }
+    }
+
+    /// The active Files-preview highlight query, if any.
+    pub fn browser_query(&self) -> Option<&str> {
+        self.browser_query.as_deref()
+    }
+
+    /// Move the preview to the next/previous line matching `browser_query`.
+    fn browser_search_jump(&mut self, forward: bool) {
+        let Some(q) = self.browser_query.clone() else {
+            return;
+        };
+        let matches = self.browser.match_lines(&q);
+        if matches.is_empty() {
+            return;
+        }
+        let cur = self.browser.content_scroll();
+        let target = if forward {
+            matches
+                .iter()
+                .find(|&&l| l > cur)
+                .or_else(|| matches.first())
+        } else {
+            matches
+                .iter()
+                .rev()
+                .find(|&&l| l < cur)
+                .or_else(|| matches.last())
+        };
+        if let Some(&line) = target {
+            self.browser.scroll_content_to(line);
         }
     }
 
@@ -1386,6 +1430,7 @@ impl App {
                 self.search = None;
                 self.repo_search = None;
                 self.pending_search = None;
+                self.browser_query = None;
                 return;
             }
             KeyCode::Char('2') => {
@@ -1493,6 +1538,9 @@ impl App {
         match key.code {
             KeyCode::Char('/') => self.open_repo_search(),
             KeyCode::Char('e') => self.open_editor(),
+            // Step through content-search matches in the preview (after a jump).
+            KeyCode::Char('n') if self.browser_query.is_some() => self.browser_search_jump(true),
+            KeyCode::Char('N') if self.browser_query.is_some() => self.browser_search_jump(false),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,

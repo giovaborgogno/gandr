@@ -169,6 +169,39 @@ impl Browser {
         self.cursor
     }
 
+    /// Line indices (0-based) in the loaded file containing `query` (smart-case:
+    /// case-insensitive unless the query has an uppercase char). For n/N in the
+    /// content preview after a repo content-search.
+    pub fn match_lines(&self, query: &str) -> Vec<usize> {
+        let Some(loaded) = &self.loaded else {
+            return Vec::new();
+        };
+        let sensitive = query.chars().any(|c| c.is_uppercase());
+        let needle = if sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+        loaded
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| {
+                if sensitive {
+                    line.contains(&needle)
+                } else {
+                    line.to_lowercase().contains(&needle)
+                }
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Scroll the preview so `line` (0-based) is at the top (clamped at render).
+    pub fn scroll_content_to(&mut self, line: usize) {
+        self.content_scroll = line;
+    }
+
     /// First visible tree row so the cursor stays on-screen for `height` rows.
     pub fn tree_scroll(&self, height: usize) -> usize {
         let mut s = self.tree_scroll.get();
