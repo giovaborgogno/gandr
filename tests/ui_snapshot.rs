@@ -256,6 +256,71 @@ fn refresh_preserves_selected_file() {
     assert_eq!(app.selected(), before);
 }
 
+// ---- M7: search, help, theme ----
+
+#[test]
+fn search_jumps_to_match() {
+    let fx = Fixture::new();
+    let original: String = (1..=40).map(|n| format!("line{n}\n")).collect();
+    fx.write("big.txt", &original);
+    fx.commit("init");
+    fx.write("big.txt", &original.replace("line30\n", "LINE30\n"));
+
+    let mut app = app_from(&fx);
+    let _ = frame(&app, 80, 14); // set viewport
+    app.handle_key(key('/'));
+    for c in "LINE30".chars() {
+        app.handle_key(key(c));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    insta::assert_snapshot!(frame(&app, 80, 14));
+}
+
+#[test]
+fn help_overlay() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('?'));
+    insta::assert_snapshot!(frame(&app, 72, 18));
+}
+
+#[test]
+fn overlays_on_tiny_terminal_do_not_panic() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('?')); // help overlay
+    let _ = frame(&app, 8, 4); // absurdly small; must not panic
+    app.handle_key(key('?')); // close help
+    app.handle_key(key('c')); // compare picker
+    let _ = frame(&app, 8, 4);
+}
+
+#[test]
+fn light_theme_uses_light_backgrounds() {
+    use gdiff::highlight::ThemeMode;
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    app.set_theme_mode(ThemeMode::Light);
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+    let completed = terminal.draw(|f| app.render(f)).unwrap();
+    let buf = completed.buffer;
+    // The light palette's add background (see Palette::for_mode(Light)).
+    let light_add = Color::Rgb(214, 247, 220);
+    let found = (0..buf.area.height)
+        .any(|y| (0..buf.area.width).any(|x| buf.cell((x, y)).unwrap().bg == light_add));
+    assert!(found, "expected light-mode add background somewhere");
+}
+
 // ---- M5: compare picker ----
 
 #[test]

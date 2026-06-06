@@ -52,23 +52,86 @@ pub fn render(app: &App, f: &mut Frame) {
     render_file_list(app, f, tree_area);
     render_viewer(app, f, viewer);
 
+    // The keybar doubles as the search prompt while searching.
+    let (keybar_text, keybar_style) = match app.search() {
+        Some(s) if s.editing => (format!("/{}", s.query), Style::default().fg(Color::Yellow)),
+        Some(s) => (
+            format!("/{}   n/N next·prev · Esc close", s.query),
+            Style::default().fg(Color::Yellow),
+        ),
+        None => (app.keybar_line(), Style::default().fg(Color::DarkGray)),
+    };
     f.render_widget(
-        Paragraph::new(Span::styled(
-            app.keybar_line(),
-            Style::default().fg(Color::DarkGray),
-        )),
+        Paragraph::new(Span::styled(keybar_text, keybar_style)),
         keybar,
     );
 
     if let Some(picker) = app.picker() {
         render_picker(f, f.area(), picker);
     }
+    if app.show_help() {
+        render_help(f, f.area());
+    }
+}
+
+/// Draw the help overlay listing keybindings.
+fn render_help(f: &mut Frame, area: Rect) {
+    const KEYS: &[(&str, &str)] = &[
+        ("j / k, ↑ / ↓", "move (tree) or scroll (diff)"),
+        ("Tab", "switch focus tree ↔ diff"),
+        ("n / p", "next / previous file"),
+        ("] / [", "next / previous hunk"),
+        (
+            "Enter, → / ←",
+            "expand / collapse tree; Enter on a file focuses diff",
+        ),
+        ("g / G, Ctrl-d/u", "top / bottom; half-page"),
+        ("s", "toggle unified / side-by-side"),
+        ("w", "toggle word-level highlight"),
+        ("Space", "mark file reviewed"),
+        ("c", "compare picker"),
+        ("/", "search in diff (n/N to navigate)"),
+        ("e", "open file in $EDITOR"),
+        ("r / a", "refresh / toggle auto-refresh"),
+        ("? / q", "this help / quit"),
+    ];
+
+    // Clamp to the area so the popup always fits (no oversized Rect on tiny terminals).
+    let width = 60.min(area.width);
+    let height = (KEYS.len() as u16 + 2).min(area.height);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    let block = Block::bordered()
+        .title("Keys")
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup);
+    f.render_widget(ratatui::widgets::Clear, popup);
+    f.render_widget(block, popup);
+
+    let lines: Vec<Line> = KEYS
+        .iter()
+        .map(|(k, desc)| {
+            Line::from(vec![
+                Span::styled(format!(" {k:<16}"), Style::default().fg(Color::Yellow)),
+                Span::raw(*desc),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Draw the compare-picker overlay centered over the frame.
 fn render_picker(f: &mut Frame, area: Rect, picker: &crate::app::Picker) {
-    let width = 40.min(area.width.saturating_sub(4)).max(10);
-    let height = (picker.items.len() as u16 + 2).min(area.height.saturating_sub(2));
+    // Clamp to the area so the popup always fits (no oversized Rect on tiny terminals).
+    let width = 40.min(area.width);
+    let height = (picker.items.len() as u16 + 2).min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup = Rect {
@@ -145,8 +208,9 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(file_header_line(app, file), file_header);
     app.set_viewport(diff_body.height as usize);
 
-    let hl = Highlighter::for_path(&file.change.path);
-    let palette = Palette::default();
+    let mode = app.theme_mode();
+    let hl = Highlighter::for_path(&file.change.path, mode);
+    let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
     match app.view() {
         ViewMode::Unified => {

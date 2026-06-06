@@ -20,6 +20,15 @@ impl ViewMode {
     }
 }
 
+/// Theme selection. `Auto` detects from the terminal background (OSC 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeChoice {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
 /// Runtime configuration. Field set grows with the milestones; see `DESIGN.md` §8.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -32,6 +41,7 @@ pub struct Config {
     pub tab_width: usize,
     /// Branches tried (in order) when detecting a base for smart comparison.
     pub base_branches: Vec<String>,
+    pub theme: ThemeChoice,
 }
 
 impl Default for Config {
@@ -44,6 +54,7 @@ impl Default for Config {
             context_lines: 3,
             tab_width: 4,
             base_branches: vec!["main".into(), "master".into(), "develop".into()],
+            theme: ThemeChoice::Auto,
         }
     }
 }

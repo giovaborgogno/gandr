@@ -15,7 +15,7 @@
 - [x] M4 — Tree + side-by-side
 - [x] M5 — Compare picker + smart + PR
 - [x] M6 — Live watch + review state
-- [ ] M7 — DX polish (search, context expand, editor, theme, config, mouse)
+- [x] M7 — DX polish (search, editor, theme auto, help) — partial; see notes
 
 Legend for sub-tasks: `[ ]` todo, `[x]` done.
 
@@ -129,17 +129,27 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] Review status cached (recomputed on refresh/toggle/spec-change, not per frame).
 - Note: a transient "updated" flash was dropped in favor of the steady `◉ watching` indicator.
 
-### M7 — DX polish
-- [ ] Contextual search (`/`) + match nav; context expand (`o` / "expand context").
-- [ ] Open in editor (`e`); copy (`y`); help overlay (`?`); mouse (scroll + click).
-- [ ] Config loading/merging (`~/.config/gdiff` + `.gdiff.toml`) + `[colors]`/`[keys]`.
-- [ ] Theme `auto` detection (termbg/OSC 11) + light/dark palettes.
-- [ ] Empty state.
+### M7 — DX polish (partial) ✅
+- [x] In-diff search (`/`) with `n`/`N` match navigation (jumps the viewer).
+- [x] Open in editor (`e`) — `$VISUAL`/`$EDITOR`, suspends/restores the TUI, `+line` / `code -g`.
+- [x] Help overlay (`?`); empty state (from M2); overlays clamp to tiny terminals.
+- [x] Theme `auto` detection (termbg/OSC 11) + light/dark palettes & syntect themes.
+- [ ] **Deferred to backlog** (see below): config-file loading (TOML), copy (`y`),
+      context expand (`o`), mouse, and tree-filter search.
 
 ---
 
 ## Backlog / later (not v1)
 
+- **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,
+  `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
+  TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.
+- **Copy** (`y`) path/selection to clipboard (needs `arboard` or OSC 52).
+- **Context expand** (`o` / "expand context") — show more surrounding lines in a hunk
+  (needs full-file content; the engine currently folds to `context_lines`).
+- **Mouse** (scroll + click-to-select-file) — enable crossterm mouse capture + hit-testing.
+- **Tree-filter search** — `/` currently searches the diff; filtering the file tree by
+  query (contextual on tree focus) is unbuilt.
 - Tab expansion (`config.tab_width`) and display-width-aware background fill
   (`unicode-width`) in the viewer — currently the bg fill uses char count, so
   CJK/wide chars and tabs can leave the delta background slightly short of the

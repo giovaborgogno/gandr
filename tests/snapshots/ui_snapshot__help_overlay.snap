@@ -1,0 +1,22 @@
+---
+source: tests/ui_snapshot.rs
+expression: "frame(&app, 72, 18)"
+---
+"gdiff · main · uncommitted · 1 file  +1 −1 · 0/1 reviewed · ◉ watching  "
+"┌Files┌Keys──────────────────────────────────────────────────────┐─────┐"
+"│  M a│ j / k, ↑ / ↓    move (tree) or scroll (diff)             │     │"
+"│     │ Tab             switch focus tree ↔ diff                 │     │"
+"│     │ n / p           next / previous file                     │     │"
+"│     │ ] / [           next / previous hunk                     │     │"
+"│     │ Enter, → / ←    expand / collapse tree; Enter on a file f│     │"
+"│     │ g / G, Ctrl-d/u top / bottom; half-page                  │     │"
+"│     │ s               toggle unified / side-by-side            │     │"
+"│     │ w               toggle word-level highlight              │     │"
+"│     │ Space           mark file reviewed                       │     │"
+"│     │ c               compare picker                           │     │"
+"│     │ /               search in diff (n/N to navigate)         │     │"
+"│     │ e               open file in $EDITOR                     │     │"
+"│     │ r / a           refresh / toggle auto-refresh            │     │"
+"│     │ ? / q           this help / quit                         │     │"
+"└─────└──────────────────────────────────────────────────────────┘─────┘"
+"Space review · c compare · s split · w word · r refresh · a auto · ? hel"

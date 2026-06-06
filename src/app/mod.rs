@@ -5,6 +5,7 @@ pub mod watcher;
 use crate::config::{Config, ViewMode};
 use crate::diff::{engine, FileDiff};
 use crate::git::{base, CompareSpec, GitBackend, RepoContext};
+use crate::highlight::ThemeMode;
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
@@ -83,7 +84,22 @@ pub struct App {
     review_cache: Vec<ReviewStatus>,
     /// Whether file changes auto-refresh the diff (working-tree comparisons).
     auto_refresh: bool,
+    /// Light/dark rendering mode (resolved from config/terminal in `run`).
+    theme_mode: ThemeMode,
+    /// Whether the help overlay is shown.
+    show_help: bool,
+    /// In-diff text search state (open when `Some`).
+    search: Option<Search>,
+    /// A pending "open in editor" request (path, 1-based line), taken by run_loop.
+    editor_request: Option<(PathBuf, u32)>,
     should_quit: bool,
+}
+
+/// In-diff search: the query and the current match's row offset.
+pub struct Search {
+    pub query: String,
+    /// Whether we're still typing the query (vs navigating matches).
+    pub editing: bool,
 }
 
 impl App {
@@ -127,6 +143,10 @@ impl App {
             review_path,
             review_cache: Vec::new(),
             auto_refresh,
+            theme_mode: ThemeMode::Dark,
+            show_help: false,
+            search: None,
+            editor_request: None,
             should_quit: false,
         };
         app.reset_view();
@@ -166,6 +186,12 @@ impl App {
     /// Whether the current comparison watches the working tree.
     pub fn spec_is_live(&self) -> bool {
         self.spec.is_live()
+    }
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.theme_mode
+    }
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        self.theme_mode = mode;
     }
 
     /// The comparison key under which review state is stored.
@@ -490,6 +516,112 @@ impl App {
         self.picker.as_ref()
     }
 
+    pub fn show_help(&self) -> bool {
+        self.show_help
+    }
+    pub fn search(&self) -> Option<&Search> {
+        self.search.as_ref()
+    }
+    /// Take a pending editor request (path, 1-based line), if any.
+    pub fn take_editor_request(&mut self) -> Option<(PathBuf, u32)> {
+        self.editor_request.take()
+    }
+
+    /// Queue opening the selected file in `$EDITOR` near its first change.
+    fn open_editor(&mut self) {
+        if let Some(file) = self.current() {
+            let line = file.hunks.first().map(|h| h.new_start).unwrap_or(1);
+            let path = self.context.root.join(&file.change.path);
+            self.editor_request = Some((path, line));
+        }
+    }
+
+    /// Row offsets (in the unified viewer) of lines matching the search query.
+    fn search_matches(&self) -> Vec<usize> {
+        let query = match &self.search {
+            Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
+            _ => return Vec::new(),
+        };
+        let Some(file) = self.current() else {
+            return Vec::new();
+        };
+        let mut matches = Vec::new();
+        let mut row = 0;
+        for hunk in &file.hunks {
+            row += 1; // header row
+            for line in &hunk.lines {
+                if line.text.to_lowercase().contains(&query) {
+                    matches.push(row);
+                }
+                row += 1;
+            }
+        }
+        matches
+    }
+
+    /// Jump the viewer to the next/previous search match (wrapping).
+    fn search_jump(&mut self, forward: bool) {
+        let matches = self.search_matches();
+        if matches.is_empty() {
+            return;
+        }
+        let cur = self.scroll;
+        let target = if forward {
+            matches
+                .iter()
+                .find(|&&o| o > cur)
+                .or_else(|| matches.first())
+        } else {
+            matches
+                .iter()
+                .rev()
+                .find(|&&o| o < cur)
+                .or_else(|| matches.last())
+        };
+        if let Some(&off) = target {
+            self.scroll = off.min(self.max_scroll());
+        }
+    }
+
+    /// Route a key to search mode; returns whether it was handled.
+    fn search_key(&mut self, key: KeyEvent) -> bool {
+        let Some(search) = self.search.as_mut() else {
+            return false;
+        };
+        if search.editing {
+            match key.code {
+                KeyCode::Char(c) => search.query.push(c),
+                KeyCode::Backspace => {
+                    search.query.pop();
+                }
+                KeyCode::Enter => {
+                    search.editing = false;
+                    self.search_jump(true);
+                }
+                KeyCode::Esc => self.search = None,
+                _ => {}
+            }
+            true
+        } else {
+            // Navigating matches: n/N move, Esc closes; other keys pass through.
+            match key.code {
+                KeyCode::Char('n') => {
+                    self.search_jump(true);
+                    true
+                }
+                KeyCode::Char('N') => {
+                    self.search_jump(false);
+                    true
+                }
+                KeyCode::Esc => {
+                    self.search = None;
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
     fn open_picker(&mut self) {
         let mut items = vec![
             PickerItem {
@@ -564,9 +696,18 @@ impl App {
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
-        // Ctrl-C always quits (even with the picker open), before `c` opens it.
+        // Ctrl-C always quits, before anything else captures keys.
         if ctrl && key.code == KeyCode::Char('c') {
             self.should_quit = true;
+            return;
+        }
+        // The help overlay, when shown, swallows the next key (any key closes it).
+        if self.show_help {
+            self.show_help = false;
+            return;
+        }
+        // Search mode captures input while editing / navigating matches.
+        if self.search_key(key) {
             return;
         }
         // The compare picker, when open, captures all other keys.
@@ -577,6 +718,14 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('?') => self.show_help = true,
+            KeyCode::Char('/') => {
+                self.search = Some(Search {
+                    query: String::new(),
+                    editing: true,
+                })
+            }
+            KeyCode::Char('e') => self.open_editor(),
             KeyCode::Char('c') => self.open_picker(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
@@ -633,9 +782,18 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     let cwd = std::env::current_dir().context("get current directory")?;
     let backend = Git2Backend::open(&cwd)?;
     let smart = inv.smart || config.smart_compare;
+    let theme_choice = config.theme;
     let resolved = base::resolve(&backend, inv.spec, smart, &config.base_branches)?;
 
     let mut app = App::with_title(config, Box::new(backend), resolved.spec, resolved.title)?;
+
+    // Resolve the theme mode — detection must happen before raw mode / alt-screen.
+    let mode = match theme_choice {
+        crate::config::ThemeChoice::Auto => crate::highlight::detect_mode(),
+        crate::config::ThemeChoice::Light => ThemeMode::Light,
+        crate::config::ThemeChoice::Dark => ThemeMode::Dark,
+    };
+    app.set_theme_mode(mode);
 
     // Watch the working tree for live auto-refresh (best-effort).
     let root = app.context().root.clone();
@@ -671,6 +829,30 @@ fn run_loop(
                 app.handle_key(key);
             }
         }
+
+        // Honor a queued editor request: suspend the TUI, run the editor, resume.
+        if let Some((path, line)) = app.take_editor_request() {
+            launch_editor(terminal, &path, line)?;
+        }
     }
+    Ok(())
+}
+
+/// Suspend the TUI, open `$EDITOR`/`$VISUAL` at `path:line`, then restore.
+fn launch_editor(terminal: &mut DefaultTerminal, path: &std::path::Path, line: u32) -> Result<()> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_string());
+
+    ratatui::restore();
+    let mut cmd = std::process::Command::new(&editor);
+    if editor.ends_with("code") || editor.ends_with("codium") {
+        cmd.arg("-g").arg(format!("{}:{line}", path.display()));
+    } else {
+        cmd.arg(format!("+{line}")).arg(path);
+    }
+    let _ = cmd.status(); // editor exit status is not actionable
+    *terminal = ratatui::try_init()?;
+    terminal.clear()?;
     Ok(())
 }
