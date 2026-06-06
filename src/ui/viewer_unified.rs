@@ -5,8 +5,8 @@
 //! delta-style diff background, and word-level emphasis. Renders the window
 //! `[scroll, scroll+height)` with the background filled to the panel edge.
 
-use crate::diff::{FileDiff, LineKind};
-use crate::highlight::{compose, Highlighter, Palette};
+use crate::diff::{FileDiff, Line as DiffLine, LineKind};
+use crate::highlight::{compose, FgSpan, Palette};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -33,12 +33,29 @@ fn num_cell(no: Option<u32>, width: usize) -> String {
     }
 }
 
+/// The precomputed syntax spans for a line: a deleted line reads from the old
+/// side (`old_no`), everything else from the new side (`new_no`). Empty if the
+/// line number is out of range (shouldn't happen for a well-formed diff).
+pub(crate) fn line_fg<'a>(
+    line: &DiffLine,
+    old_hl: &'a [Vec<FgSpan>],
+    new_hl: &'a [Vec<FgSpan>],
+) -> &'a [FgSpan] {
+    let spans = match line.kind {
+        LineKind::Del => line.old_no.and_then(|n| old_hl.get(n as usize - 1)),
+        _ => line.new_no.and_then(|n| new_hl.get(n as usize - 1)),
+    };
+    spans.map(Vec::as_slice).unwrap_or(&[])
+}
+
 /// Build every row of the file's diff as a styled [`Line`], filling backgrounds
 /// to `width` columns.
+#[allow(clippy::too_many_arguments)]
 pub fn rows(
     file: &FileDiff,
     width: usize,
-    hl: &Highlighter,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
@@ -66,12 +83,12 @@ pub fn rows(
                 Span::raw(" "),
             ];
 
-            let fg = hl.fg_spans(&line.text);
+            let fg = line_fg(line, old_hl, new_hl);
             let text_spans = compose::line_spans(
                 &line.text,
                 line.kind,
                 &line.segments,
-                &fg,
+                fg,
                 palette,
                 word_on,
                 query,
@@ -103,7 +120,8 @@ pub fn render(
     area: Rect,
     file: &FileDiff,
     scroll: usize,
-    hl: &Highlighter,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
@@ -113,7 +131,15 @@ pub fn render(
         width: area.width.saturating_sub(1),
         ..area
     };
-    let all = rows(file, content.width as usize, hl, palette, word_on, query);
+    let all = rows(
+        file,
+        content.width as usize,
+        old_hl,
+        new_hl,
+        palette,
+        word_on,
+        query,
+    );
     let total = all.len();
     let height = area.height as usize;
     let effective = scroll.min(total.saturating_sub(height));

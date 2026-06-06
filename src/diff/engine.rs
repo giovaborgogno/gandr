@@ -30,6 +30,13 @@ fn strip_newline(s: &str) -> &str {
     }
 }
 
+/// Split `text` into display lines using the same line source as the diff
+/// engine, so the resulting `Vec` is indexed identically to the `old_no`/`new_no`
+/// (1-based) carried on each [`Line`]. Trailing newlines are stripped for display.
+pub fn split_lines(text: &str) -> Vec<String> {
+    lines(text).map(|l| strip_newline(l).to_string()).collect()
+}
+
 /// Compute displayed line hunks (with `context` lines of surrounding context,
 /// adjacent changes merged) for two UTF-8 texts.
 pub fn line_hunks(old: &str, new: &str, context: usize) -> Vec<Hunk> {
@@ -180,11 +187,15 @@ pub fn build_file_diff(
         return FileDiff {
             change,
             hunks: Vec::new(),
+            old_text: String::new(),
+            new_text: String::new(),
         };
     }
 
     // Not binary ⇒ both present sides are valid UTF-8.
-    let hunks = line_hunks(as_text(old), as_text(new), context);
+    let old_text = as_text(old);
+    let new_text = as_text(new);
+    let hunks = line_hunks(old_text, new_text, context);
 
     let mut additions = 0;
     let mut deletions = 0;
@@ -200,7 +211,12 @@ pub fn build_file_diff(
     change.additions = additions;
     change.deletions = deletions;
 
-    FileDiff { change, hunks }
+    FileDiff {
+        change,
+        hunks,
+        old_text: old_text.to_string(),
+        new_text: new_text.to_string(),
+    }
 }
 
 /// Compute diffs for every changed file in a comparison, via the backend.

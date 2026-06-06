@@ -475,6 +475,54 @@ fn repo_search_jumps_to_result() {
     assert_eq!(app.browser().content_scroll(), 2);
 }
 
+// ---- M12 (diff viewer): multi-line syntax highlighting ----
+
+#[test]
+fn diff_highlight_carries_state_across_lines() {
+    let fx = Fixture::new();
+    // A block comment, then a change below it. The comment opener may fold out of
+    // view, but the new-side highlight must still treat lines 2–3 as comment.
+    fx.write("a.rs", "/* open\n still comment\n */\nlet x = 1;\n");
+    fx.commit("init");
+    fx.write("a.rs", "/* open\n still comment\n */\nlet x = 2;\n");
+    let app = app_from(&fx);
+
+    let (_old, new_hl) = app.diff_highlight();
+    let opener = new_hl[0].first().map(|s| s.color);
+    let interior = new_hl[1].first().map(|s| s.color);
+    assert!(opener.is_some());
+    assert_eq!(
+        opener, interior,
+        "an interior comment line must share the opener's color (state carried)"
+    );
+    // Cached: a second call returns the same handle (Rc) without recomputing.
+    let (_o2, new2) = app.diff_highlight();
+    assert!(std::rc::Rc::ptr_eq(&new_hl, &new2));
+}
+
+#[test]
+fn diff_highlight_invalidates_on_same_path_edit() {
+    let fx = Fixture::new();
+    fx.write("a.rs", "let x = 1;\n");
+    fx.commit("init");
+    fx.write("a.rs", "let x = 2;\n");
+    let mut app = app_from(&fx);
+
+    let (_o, before) = app.diff_highlight();
+    // A working-tree edit changes the same file's content (and grows it). The
+    // cache key is (path, theme); without invalidation it would serve stale spans.
+    fx.write("a.rs", "// added a comment line\nlet x = 3;\nlet y = 4;\n");
+    app.refresh(); // re-diffs the same path → apply_files must drop the cache
+    let (_o2, after) = app.diff_highlight();
+
+    assert!(
+        !std::rc::Rc::ptr_eq(&before, &after),
+        "same-path content change must recompute the highlight, not reuse stale spans"
+    );
+    // The new map covers the grown file (3 new-side lines).
+    assert_eq!(after.len(), 3);
+}
+
 // ---- M11: expand context ----
 
 #[test]

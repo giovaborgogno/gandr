@@ -118,6 +118,19 @@ fn main() -> Result<()> {
         app.handle_key(key('j')); // → app/
         app.handle_key(key('j')); // → demo.rs (loads it)
     }
+    if has("diffml") {
+        // A change a few lines below a multi-line block comment: the context
+        // lines inside the comment must render as comment (carried state), which
+        // per-line highlighting couldn't do (M12 in the diff viewer).
+        let v1 = "/* a block comment\n   second line, no marker\n   third line, closes here */\nfn main() {\n    let x = 1;\n}\n";
+        let v2 = "/* a block comment\n   second line, no marker\n   third line, closes here */\nfn main() {\n    let x = 42;\n}\n";
+        fx.write("src/demo.rs", v1);
+        fx.commit("seed");
+        fx.write("src/demo.rs", v2);
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+    }
     if has("help") {
         app.handle_key(key('?'));
     }

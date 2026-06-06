@@ -11,7 +11,7 @@ pub mod viewer_unified;
 use crate::app::{App, Focus, Tab};
 use crate::config::ViewMode;
 use crate::diff::FileDiff;
-use crate::highlight::{Highlighter, Palette};
+use crate::highlight::Palette;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -520,9 +520,12 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     app.set_viewport(diff_body.height as usize);
 
     let mode = app.theme_mode();
-    let hl = Highlighter::for_path(&file.change.path, mode);
     let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
+    // Per-file syntax highlight spans, computed with carried state across the
+    // whole file (M12) and cached — so block comments / multi-line strings are
+    // correct in the diff, not just the Files tab.
+    let (old_hl, new_hl) = app.diff_highlight();
     // Highlight search matches in the diff while a (non-empty) query is active.
     let query = app
         .search()
@@ -534,7 +537,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
             diff_body,
             file,
             app.scroll(),
-            &hl,
+            &old_hl,
+            &new_hl,
             &palette,
             word_on,
             query,
@@ -544,7 +548,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
             diff_body,
             file,
             app.scroll(),
-            &hl,
+            &old_hl,
+            &new_hl,
             &palette,
             word_on,
             query,

@@ -79,9 +79,9 @@ impl Highlighter {
     }
 
     /// Foreground spans for one line, highlighted in isolation (no carried
-    /// state). Use for diff lines where the surrounding file isn't available in
-    /// order; multi-line constructs (block comments / strings) aren't tracked.
-    /// Empty on any highlighter error.
+    /// state) — multi-line constructs aren't tracked. The diff and Files viewers
+    /// use [`Highlighter::highlight_file`] instead; this single-line primitive
+    /// remains for callers without the surrounding file. Empty on any error.
     pub fn fg_spans(&self, text: &str) -> Vec<FgSpan> {
         let mut hl = HighlightLines::new(self.syntax, theme(self.mode));
         match hl.highlight_line(text, syntaxes()) {

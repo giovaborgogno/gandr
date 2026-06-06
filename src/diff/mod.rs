@@ -52,4 +52,10 @@ pub struct Hunk {
 pub struct FileDiff {
     pub change: FileChange,
     pub hunks: Vec<Hunk>,
+    /// Full decoded old/new file text (empty for an absent side or a binary
+    /// file). Kept so the UI can highlight each side with carried state (M12)
+    /// and reveal folded context on demand (per-gap expand). See
+    /// [`engine::split_lines`] for the line indexing that matches `old_no`/`new_no`.
+    pub old_text: String,
+    pub new_text: String,
 }

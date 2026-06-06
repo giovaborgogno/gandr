@@ -27,6 +27,8 @@ fn file_diff(path: &str, text: &str) -> FileDiff {
                 segments: vec![],
             }],
         }],
+        old_text: String::new(),
+        new_text: text.into(),
     }
 }
 

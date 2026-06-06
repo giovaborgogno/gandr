@@ -8,7 +8,7 @@ use crate::config::{Config, ViewMode};
 use crate::diff::{engine, FileDiff};
 use crate::fuzzy;
 use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext};
-use crate::highlight::ThemeMode;
+use crate::highlight::{FgSpan, Highlighter, ThemeMode};
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::search::{SearchMode, SearchResults};
 use crate::ui;
@@ -16,9 +16,10 @@ use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// Which pane the directional keys act on. Navigation is *hybrid*: `Tab` switches
 /// focus (driving `j`/`k`), but `n`/`p` (file) and `]`/`[` (hunk) work regardless.
@@ -99,6 +100,10 @@ pub struct App {
     tree_scroll: Cell<usize>,
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
+    /// Cached stateful syntax-highlight spans for the selected file's old/new
+    /// sides (M12), keyed by (path, theme). Recomputed lazily on render when the
+    /// selection or theme changes — never per frame.
+    diff_hl: RefCell<DiffHighlight>,
     /// The compare picker overlay, when open.
     picker: Option<Picker>,
     /// Persisted review state + where it lives.
@@ -149,6 +154,20 @@ pub struct RepoSearch {
     pub loading: bool,
 }
 
+/// Shared, per-line syntax-highlight spans for one side of a file (one span list
+/// per line). Behind an `Rc` so the render path can clone the handle cheaply.
+pub type SideHighlight = Rc<Vec<Vec<FgSpan>>>;
+
+/// Cached per-line syntax highlighting for the selected file's two sides,
+/// computed with carried state across the whole file (M12). `old`/`new` are
+/// indexed by `old_no - 1` / `new_no - 1`.
+#[derive(Default)]
+struct DiffHighlight {
+    key: Option<(PathBuf, ThemeMode)>,
+    old: SideHighlight,
+    new: SideHighlight,
+}
+
 /// In-diff search: the query and the current match's row offset.
 pub struct Search {
     pub query: String,
@@ -193,6 +212,7 @@ impl App {
             tree_cursor: 0,
             tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
+            diff_hl: RefCell::new(DiffHighlight::default()),
             picker: None,
             review,
             review_path,
@@ -339,6 +359,34 @@ impl App {
     /// Let the renderer record the diff-viewport height for page math.
     pub fn set_viewport(&self, rows: usize) {
         self.viewport.set(rows);
+    }
+
+    /// Stateful syntax-highlight spans for the selected file's old and new sides
+    /// (indexed by `old_no-1` / `new_no-1`). Computed once per (file, theme) and
+    /// cached; the `Rc` clones are cheap, so the renderer can call this per frame.
+    pub fn diff_highlight(&self) -> (SideHighlight, SideHighlight) {
+        let key = self
+            .current()
+            .map(|f| (f.change.path.clone(), self.theme_mode));
+        if self.diff_hl.borrow().key == key {
+            let cache = self.diff_hl.borrow();
+            return (cache.old.clone(), cache.new.clone());
+        }
+        let (old, new) = match self.current() {
+            Some(f) => {
+                let hl = Highlighter::for_path(&f.change.path, self.theme_mode);
+                (
+                    Rc::new(hl.highlight_file(&engine::split_lines(&f.old_text))),
+                    Rc::new(hl.highlight_file(&engine::split_lines(&f.new_text))),
+                )
+            }
+            None => (Rc::new(Vec::new()), Rc::new(Vec::new())),
+        };
+        let mut cache = self.diff_hl.borrow_mut();
+        cache.key = key;
+        cache.old = Rc::clone(&old);
+        cache.new = Rc::clone(&new);
+        (old, new)
     }
 
     // ---- file tree ----
@@ -556,6 +604,10 @@ impl App {
         let prev_scroll = self.scroll;
         self.files = files;
         self.error = None;
+        // The file set (and thus old/new text) changed: drop the cached syntax
+        // highlight so a same-path working-tree edit doesn't keep stale colors.
+        // The (path, theme) key wouldn't otherwise notice a content change.
+        self.diff_hl.get_mut().key = None;
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
         {

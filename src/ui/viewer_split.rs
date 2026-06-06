@@ -5,7 +5,8 @@
 //! the two sides stay aligned (the user-chosen behavior over truncation).
 
 use crate::diff::{FileDiff, Hunk, Line as DiffLine, LineKind};
-use crate::highlight::{compose, Highlighter, Palette};
+use crate::highlight::{compose, FgSpan, Palette};
+use crate::ui::viewer_unified::line_fg;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -74,11 +75,13 @@ fn base_bg(kind: LineKind, palette: &Palette) -> Option<Color> {
 
 /// Render one cell (one diff line on one side) into wrapped rows of spans, each
 /// padded to `side_w` columns. `None` cell → blank rows.
+#[allow(clippy::too_many_arguments)]
 fn cell_rows(
     line: Option<&DiffLine>,
     side_w: usize,
     gutter_w: usize,
-    hl: &Highlighter,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
@@ -88,12 +91,12 @@ fn cell_rows(
         return vec![vec![Span::raw(" ".repeat(side_w))]];
     };
 
-    let fg = hl.fg_spans(&line.text);
+    let fg = line_fg(line, old_hl, new_hl);
     let composed = compose::line_spans(
         &line.text,
         line.kind,
         &line.segments,
-        &fg,
+        fg,
         palette,
         word_on,
         query,
@@ -171,10 +174,12 @@ fn pair_rows(hunk: &Hunk) -> Vec<(Option<&DiffLine>, Option<&DiffLine>)> {
 }
 
 /// Build every terminal row of the side-by-side view.
+#[allow(clippy::too_many_arguments)]
 pub fn rows(
     file: &FileDiff,
     width: usize,
-    hl: &Highlighter,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
@@ -190,8 +195,12 @@ pub fn rows(
         )));
 
         for (left, right) in pair_rows(hunk) {
-            let left_rows = cell_rows(left, side_w, gutter_w, hl, palette, word_on, query);
-            let right_rows = cell_rows(right, side_w, gutter_w, hl, palette, word_on, query);
+            let left_rows = cell_rows(
+                left, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+            );
+            let right_rows = cell_rows(
+                right, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+            );
             let height = left_rows.len().max(right_rows.len());
 
             for k in 0..height {
@@ -220,7 +229,8 @@ pub fn render(
     area: Rect,
     file: &FileDiff,
     scroll: usize,
-    hl: &Highlighter,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
@@ -230,7 +240,15 @@ pub fn render(
         width: area.width.saturating_sub(1),
         ..area
     };
-    let all = rows(file, content.width as usize, hl, palette, word_on, query);
+    let all = rows(
+        file,
+        content.width as usize,
+        old_hl,
+        new_hl,
+        palette,
+        word_on,
+        query,
+    );
     let total = all.len();
     let height = area.height as usize;
     let effective = scroll.min(total.saturating_sub(height));

@@ -17,6 +17,8 @@ fn file(path: &str) -> FileDiff {
             deletions: 0,
         },
         hunks: vec![],
+        old_text: String::new(),
+        new_text: String::new(),
     }
 }
 
