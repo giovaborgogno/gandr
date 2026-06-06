@@ -1,6 +1,6 @@
 ---
 source: tests/ui_snapshot.rs
-expression: "frame(&app, 72, 18)"
+expression: "frame(&app, 72, 20)"
 ---
 " Diff [1]   Files [2]   <repo>
 "gdiff ┌Keys──────────────────────────────────────────────────────┐hing  "
@@ -14,9 +14,11 @@ expression: "frame(&app, 72, 18)"
 "│     │ w               toggle word-level highlight              │     │"
 "│     │ Space           mark file reviewed                       │     │"
 "│     │ c               compare picker                           │     │"
+"│     │ b               compare vs branch/tag (fuzzy)            │     │"
 "│     │ /               search in diff (n/N to navigate)         │     │"
 "│     │ e               open file in $EDITOR                     │     │"
 "│     │ r / a           refresh / toggle auto-refresh            │     │"
 "│     │ ? / q           this help / quit                         │     │"
-"└─────└──────────────────────────────────────────────────────────┘─────┘"
-"j/k move  Tab focus  n/p file  ]/[ hunk  c compare  Space review  s spli"
+"│     └──────────────────────────────────────────────────────────┘     │"
+"└──────────────────────────────┘└──────────────────────────────────────┘"
+"j/k move  Tab focus  n/p file  ]/[ hunk  c compare  b ref  Space review "

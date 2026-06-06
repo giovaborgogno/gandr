@@ -109,6 +109,20 @@ fn main() -> Result<()> {
     if has("picker") {
         app.handle_key(key('c'));
     }
+    if has("refpicker") {
+        // A few refs to rank; then open the picker and type a fuzzy query.
+        fx.checkout_new_branch("feature/login");
+        fx.checkout_new_branch("release/2.0");
+        fx.tag("v1.9.0");
+        // Reopen the backend so the new refs are visible, then re-seed the app.
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+        app.handle_key(key('b'));
+        for c in "feat".chars() {
+            app.handle_key(key(c));
+        }
+    }
 
     let env_u16 = |k: &str, d: u16| {
         std::env::var(k)

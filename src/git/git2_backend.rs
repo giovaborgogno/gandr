@@ -4,9 +4,11 @@
 //! Supports all concrete [`CompareSpec`] kinds (a `Pr` must be resolved to a
 //! `Range` first — see `git::base`).
 
-use super::{CompareSpec, FileBlobs, FileChange, GitBackend, RepoContext, Status};
+use super::{
+    CompareSpec, FileBlobs, FileChange, GitBackend, RefEntry, RefKind, RepoContext, Status,
+};
 use anyhow::{bail, Context, Result};
-use git2::{Commit, Delta, DiffFindOptions, DiffOptions, Repository, Tree};
+use git2::{BranchType, Commit, Delta, DiffFindOptions, DiffOptions, Repository, Tree};
 use std::path::Path;
 
 /// A backend bound to one repository.
@@ -280,6 +282,50 @@ impl GitBackend for Git2Backend {
             }
         }
         Ok(None)
+    }
+
+    fn list_refs(&self) -> Result<Vec<RefEntry>> {
+        let mut local = Vec::new();
+        let mut remote = Vec::new();
+        // Branches: skip the symbolic `origin/HEAD` pointer (it's noise, not a ref
+        // you'd compare against). A non-UTF-8 name is skipped rather than erroring.
+        for branch in self.repo.branches(None)?.flatten() {
+            let (branch, bt) = branch;
+            let Some(name) = branch.name().ok().flatten() else {
+                continue;
+            };
+            if bt == BranchType::Remote && name.ends_with("/HEAD") {
+                continue;
+            }
+            let entry = RefEntry {
+                name: name.to_string(),
+                kind: match bt {
+                    BranchType::Local => RefKind::LocalBranch,
+                    BranchType::Remote => RefKind::RemoteBranch,
+                },
+            };
+            match bt {
+                BranchType::Local => local.push(entry),
+                BranchType::Remote => remote.push(entry),
+            }
+        }
+
+        let mut tags = Vec::new();
+        let tag_names = self.repo.tag_names(None)?;
+        // Iter yields `Result<Option<&str>, _>`: flatten the Result, then the Option.
+        for name in tag_names.iter().flatten().flatten() {
+            tags.push(RefEntry {
+                name: name.to_string(),
+                kind: RefKind::Tag,
+            });
+        }
+
+        for group in [&mut local, &mut remote, &mut tags] {
+            group.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        local.extend(remote);
+        local.extend(tags);
+        Ok(local)
     }
 }
 

@@ -145,7 +145,10 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       New **Files** tab: lazy tree of the whole working tree (incl. git-ignored
       files/folders; only `.git/` is skipped), selecting a file shows its content
       syntax-highlighted.
-- [ ] M9 — Branch/ref picker: pick *and fuzzy-search* any branch/tag/commit to compare.
+- [x] M9 — Branch/ref picker: pick *and fuzzy-search* any branch/tag to compare.
+      `b` (or the `c` compare menu) opens a fuzzy picker over all local/remote
+      branches + tags (fzf-style `fuzzy::score`, smart-case); Enter compares the
+      working tree against it (`WorkdirVs`). Backed by `GitBackend::list_refs`.
 - [x] M10 — Search across all files (jump to file + match), not just the current file.
       *Delivered by M14 (the repo-wide content search jumps to file + line).*
 - [ ] M11 — Expand context (`o`): reveal more lines around a hunk.
@@ -165,9 +168,9 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ## Backlog / later (not v1)
 
-- **Branch/ref picker** — interactively pick *and search* any branch / tag / commit
-  to compare against (the compare picker currently offers only Uncommitted, Staged,
-  the auto-detected base, and the PR). A fuzzy list of refs would close this.
+- ~~**Branch/ref picker**~~ — done in M9 (`b` opens a fuzzy picker over branches +
+  tags). A possible follow-up: include arbitrary commits / reflog entries, and let
+  the chosen ref be either side of a range (currently it's always `WorkdirVs`).
 - ~~**Search across all files**~~ — done in M14 (Files-tab `/` searches names + content
   repo-wide and jumps to file+line). A possible follow-up: debounce keystrokes so a
   broad query on a huge repo doesn't spawn a walk per character (the epoch already

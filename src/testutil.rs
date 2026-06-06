@@ -128,4 +128,18 @@ impl Fixture {
             .expect("set head");
         self
     }
+
+    /// Create a lightweight tag at the current `HEAD`.
+    pub fn tag(&self, name: &str) -> &Self {
+        let head = self
+            .repo
+            .head()
+            .expect("head")
+            .peel_to_commit()
+            .expect("head commit");
+        self.repo
+            .tag_lightweight(name, head.as_object(), false)
+            .expect("create tag");
+        self
+    }
 }

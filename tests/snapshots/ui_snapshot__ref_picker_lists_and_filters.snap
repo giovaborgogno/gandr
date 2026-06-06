@@ -1,0 +1,18 @@
+---
+source: tests/ui_snapshot.rs
+expression: "frame(&app, 70, 14)"
+---
+" Diff [1]   Files [2]   <repo>
+"gd┌Compare vs ref · 2 matches──────────────────────────────────────┐ w"
+"┌F│> log                                                           │─┐"
+"│ │feature/login                                           (branch)│ │"
+"│ │feature/logout                                          (branch)│ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"│ │                                                                │ │"
+"└─└────────────────────────────────────────────────────────────────┘─┘"
+"type to filter · ↑/↓ select · Enter compare · Esc close               "

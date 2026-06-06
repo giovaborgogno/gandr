@@ -28,6 +28,7 @@ const KEYBAR: &[(&str, &str)] = &[
     ("n/p", "file"),
     ("]/[", "hunk"),
     ("c", "compare"),
+    ("b", "ref"),
     ("Space", "review"),
     ("s", "split"),
     ("/", "find"),
@@ -132,6 +133,9 @@ pub fn render(app: &App, f: &mut Frame) {
     if let Some(picker) = app.picker() {
         render_picker(f, f.area(), picker);
     }
+    if let Some(rp) = app.ref_picker() {
+        render_ref_picker(f, f.area(), rp);
+    }
     if let Some(rs) = app.repo_search() {
         render_repo_search(f, f.area(), rs);
     }
@@ -202,6 +206,73 @@ fn render_repo_search(f: &mut Frame, area: Rect, rs: &crate::app::RepoSearch) {
                 lines.push(result_line(i == rs.selected, text, cols));
             }
         }
+    }
+    f.render_widget(Paragraph::new(lines), list_area);
+}
+
+/// Draw the fuzzy ref picker: a query line over a ranked, selectable list of
+/// branches/tags (each tagged with its kind).
+fn render_ref_picker(f: &mut Frame, area: Rect, rp: &crate::app::RefPicker) {
+    let width = area.width.saturating_sub(4).clamp(1, 70);
+    let height = area.height.saturating_sub(2).clamp(3, 20);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    let title = format!("Compare vs ref · {} matches", rp.filtered.len());
+    let block = Block::bordered()
+        .title(title)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup);
+    f.render_widget(ratatui::widgets::Clear, popup);
+    f.render_widget(block, popup);
+
+    let [query_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::DarkGray)),
+            Span::styled(rp.query.clone(), Style::default().fg(Color::Yellow)),
+        ])),
+        query_area,
+    );
+
+    let rows = list_area.height as usize;
+    let cols = list_area.width as usize;
+    let scroll = rp.selected.saturating_sub(rows.saturating_sub(1));
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, &idx) in rp.filtered.iter().enumerate().skip(scroll).take(rows) {
+        let entry = &rp.all[idx];
+        let selected = i == rp.selected;
+        let style = if selected {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        // "name            (kind)" padded so the kind tag right-aligns-ish.
+        let tag = format!(" ({})", entry.kind.label());
+        let avail = cols.saturating_sub(tag.chars().count());
+        let name: String = entry.name.chars().take(avail).collect();
+        let pad = avail.saturating_sub(name.chars().count());
+        let mut spans = vec![Span::styled(name, style)];
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), style));
+        }
+        spans.push(Span::styled(
+            tag,
+            if selected {
+                style
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ));
+        lines.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(lines), list_area);
 }
@@ -285,6 +356,12 @@ fn keybar_line(app: &App) -> Line<'static> {
             Style::default().fg(Color::Yellow),
         ));
     }
+    if app.ref_picker().is_some() {
+        return Line::from(Span::styled(
+            "type to filter · ↑/↓ select · Enter compare · Esc close",
+            Style::default().fg(Color::Yellow),
+        ));
+    }
     match (app.search(), app.error_message()) {
         (Some(s), _) if s.editing => Line::from(Span::styled(
             format!("/{}", s.query),
@@ -321,6 +398,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("w", "toggle word-level highlight"),
         ("Space", "mark file reviewed"),
         ("c", "compare picker"),
+        ("b", "compare vs branch/tag (fuzzy)"),
         ("/", "search in diff (n/N to navigate)"),
         ("e", "open file in $EDITOR"),
         ("r / a", "refresh / toggle auto-refresh"),

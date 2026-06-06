@@ -316,7 +316,10 @@ fn help_overlay() {
     fx.write("a.txt", "y\n");
     let mut app = app_from(&fx);
     app.handle_key(key('?'));
-    insta::assert_snapshot!(frame(&app, 72, 18));
+    // Height 20 keeps the centered help popup off row 0, so the tab bar (and its
+    // redacted repo path) stays visible — otherwise the popup hides "Files [2]"
+    // and the random temp-dir path leaks into the snapshot (non-deterministic).
+    insta::assert_snapshot!(frame(&app, 72, 20));
 }
 
 #[test]
@@ -470,6 +473,51 @@ fn repo_search_jumps_to_result() {
     assert!(loaded.path.ends_with("lib.rs"));
     // Revealed at the matched line (line 3 → 0-based scroll 2), clamped to file.
     assert_eq!(app.browser().content_scroll(), 2);
+}
+
+// ---- M9: fuzzy ref picker ----
+
+#[test]
+fn ref_picker_lists_and_filters() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "a\n");
+    fx.commit("init"); // main
+    fx.checkout_new_branch("feature/login");
+    fx.checkout_new_branch("feature/logout");
+    fx.checkout_new_branch("release-1.0");
+    fx.tag("v1.0.0");
+    fx.write("a.txt", "a changed\n");
+    let mut app = app_from(&fx);
+
+    app.handle_key(key('b')); // open the fuzzy ref picker
+    for c in "log".chars() {
+        // narrows to the two feature/log* branches, ranked
+        app.handle_key(key(c));
+    }
+    insta::assert_snapshot!(frame(&app, 70, 14));
+}
+
+#[test]
+fn ref_picker_enter_sets_comparison() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "a\n");
+    fx.commit("init"); // main
+    fx.checkout_new_branch("feature/login");
+    fx.write("a.txt", "a changed\n");
+    let mut app = app_from(&fx);
+
+    app.handle_key(key('b'));
+    for c in "main".chars() {
+        app.handle_key(key(c));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(app.ref_picker().is_none(), "overlay closes on selection");
+    // The comparison switched to "working tree vs main".
+    assert!(
+        app.header_line().contains("vs main"),
+        "header should show the new comparison: {}",
+        app.header_line()
+    );
 }
 
 // ---- M5: compare picker ----

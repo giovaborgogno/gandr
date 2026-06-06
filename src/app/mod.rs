@@ -6,7 +6,8 @@ pub mod watcher;
 use crate::browser::Browser;
 use crate::config::{Config, ViewMode};
 use crate::diff::{engine, FileDiff};
-use crate::git::{base, CompareSpec, GitBackend, RepoContext};
+use crate::fuzzy;
+use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext};
 use crate::highlight::ThemeMode;
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::search::{SearchMode, SearchResults};
@@ -40,6 +41,8 @@ enum PickerAction {
     Spec(CompareSpec),
     /// Resolve the current branch's PR via `gh` on selection.
     Pr,
+    /// Open the fuzzy ref picker (branches/tags) on selection.
+    RefSearch,
 }
 
 /// One entry in the compare picker.
@@ -53,6 +56,22 @@ pub struct PickerItem {
 pub struct Picker {
     pub items: Vec<PickerItem>,
     pub selected: usize,
+}
+
+/// The fuzzy ref-picker overlay: pick any branch/tag to compare the working
+/// tree against. `filtered` holds indices into `all`, ranked best-match-first.
+pub struct RefPicker {
+    pub query: String,
+    pub all: Vec<RefEntry>,
+    pub filtered: Vec<usize>,
+    pub selected: usize,
+}
+
+impl RefPicker {
+    /// The currently highlighted ref entry, if any.
+    pub fn current(&self) -> Option<&RefEntry> {
+        self.filtered.get(self.selected).map(|&i| &self.all[i])
+    }
 }
 
 /// The whole application state.
@@ -106,6 +125,8 @@ pub struct App {
     show_help: bool,
     /// In-diff text search state (open when `Some`).
     search: Option<Search>,
+    /// The fuzzy ref-picker overlay, when open.
+    ref_picker: Option<RefPicker>,
     /// Repo-wide search overlay (Files tab), open when `Some`.
     repo_search: Option<RepoSearch>,
     /// Monotonic token; a background search result is applied only if it matches.
@@ -185,6 +206,7 @@ impl App {
             browser,
             show_help: false,
             search: None,
+            ref_picker: None,
             repo_search: None,
             search_epoch: 0,
             pending_search: None,
@@ -594,6 +616,9 @@ impl App {
     pub fn repo_search(&self) -> Option<&RepoSearch> {
         self.repo_search.as_ref()
     }
+    pub fn ref_picker(&self) -> Option<&RefPicker> {
+        self.ref_picker.as_ref()
+    }
     /// Take a pending editor request (path, 1-based line), if any.
     pub fn take_editor_request(&mut self) -> Option<(PathBuf, u32)> {
         self.editor_request.take()
@@ -827,6 +852,99 @@ impl App {
         true
     }
 
+    // ---- fuzzy ref picker ----
+
+    /// Open the fuzzy ref picker, loading branches/tags from the backend. On a
+    /// backend error the picker stays closed and the error surfaces in the keybar.
+    fn open_ref_picker(&mut self) {
+        match self.backend.list_refs() {
+            Ok(all) => {
+                let filtered = (0..all.len()).collect();
+                self.ref_picker = Some(RefPicker {
+                    query: String::new(),
+                    all,
+                    filtered,
+                    selected: 0,
+                });
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Recompute the ranked `filtered` list from the current query.
+    fn ref_picker_filter(&mut self) {
+        let Some(rp) = self.ref_picker.as_mut() else {
+            return;
+        };
+        if rp.query.is_empty() {
+            rp.filtered = (0..rp.all.len()).collect();
+        } else {
+            let mut scored: Vec<(usize, i32)> = rp
+                .all
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| fuzzy::score(&rp.query, &e.name).map(|s| (i, s)))
+                .collect();
+            // Best score first; ties broken by name for a stable, readable order.
+            scored.sort_by(|a, b| b.1.cmp(&a.1).then(rp.all[a.0].name.cmp(&rp.all[b.0].name)));
+            rp.filtered = scored.into_iter().map(|(i, _)| i).collect();
+        }
+        // On an empty result set `selected` lands at 0 (a non-existent row); all
+        // consumers (`current`, render, apply) read it through `.get()`/iteration,
+        // so this never indexes out of bounds.
+        rp.selected = rp.selected.min(rp.filtered.len().saturating_sub(1));
+    }
+
+    /// Apply the highlighted ref: compare the working tree against it.
+    fn ref_picker_apply(&mut self) {
+        let name = self
+            .ref_picker
+            .as_ref()
+            .and_then(|rp| rp.current())
+            .map(|e| e.name.clone());
+        if let Some(name) = name {
+            self.ref_picker = None;
+            self.set_spec(CompareSpec::WorkdirVs(name), None);
+        }
+    }
+
+    /// Route a key to the open ref picker; returns whether it was handled.
+    fn ref_picker_key(&mut self, key: KeyEvent) -> bool {
+        if self.ref_picker.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => self.ref_picker = None,
+            KeyCode::Enter => self.ref_picker_apply(),
+            KeyCode::Up => {
+                if let Some(rp) = self.ref_picker.as_mut() {
+                    rp.selected = rp.selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(rp) = self.ref_picker.as_mut() {
+                    if rp.selected + 1 < rp.filtered.len() {
+                        rp.selected += 1;
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(rp) = self.ref_picker.as_mut() {
+                    rp.query.pop();
+                }
+                self.ref_picker_filter();
+            }
+            KeyCode::Char(c) => {
+                if let Some(rp) = self.ref_picker.as_mut() {
+                    rp.query.push(c);
+                }
+                self.ref_picker_filter();
+            }
+            _ => {}
+        }
+        true
+    }
+
     fn open_picker(&mut self) {
         let mut items = vec![
             PickerItem {
@@ -845,6 +963,10 @@ impl App {
             });
         }
         items.push(PickerItem {
+            label: "Branch / tag… (fuzzy search)".into(),
+            action: PickerAction::RefSearch,
+        });
+        items.push(PickerItem {
             label: "PR (current branch, via gh)".into(),
             action: PickerAction::Pr,
         });
@@ -860,6 +982,7 @@ impl App {
         };
         match item.action {
             PickerAction::Spec(spec) => self.set_spec(spec, None),
+            PickerAction::RefSearch => self.open_ref_picker(),
             PickerAction::Pr => match base::resolve_pr(None) {
                 Ok(r) => self.set_spec(r.spec, r.title),
                 Err(e) => self.error = Some(e.to_string()),
@@ -917,6 +1040,10 @@ impl App {
         if self.repo_search_key(key) {
             return;
         }
+        // Likewise the fuzzy ref picker captures all keys while typing a query.
+        if self.ref_picker_key(key) {
+            return;
+        }
 
         // Global keys (both tabs): quit, help, tab switching.
         match key.code {
@@ -940,6 +1067,7 @@ impl App {
                 self.tab = Tab::Files;
                 self.picker = None;
                 self.search = None;
+                self.ref_picker = None;
                 self.repo_search = None;
                 self.pending_search = None;
                 return;
@@ -972,6 +1100,7 @@ impl App {
             }
             KeyCode::Char('e') => self.open_editor(),
             KeyCode::Char('c') => self.open_picker(),
+            KeyCode::Char('b') => self.open_ref_picker(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,

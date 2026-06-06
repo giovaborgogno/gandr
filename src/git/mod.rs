@@ -92,6 +92,33 @@ pub struct RepoContext {
     pub branch: Option<String>,
 }
 
+/// What a [`RefEntry`] points at, for grouping/ordering in the ref picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefKind {
+    LocalBranch,
+    RemoteBranch,
+    Tag,
+}
+
+impl RefKind {
+    /// Short tag shown next to the name in the picker.
+    pub fn label(self) -> &'static str {
+        match self {
+            RefKind::LocalBranch => "branch",
+            RefKind::RemoteBranch => "remote",
+            RefKind::Tag => "tag",
+        }
+    }
+}
+
+/// A selectable git ref (branch/tag) for the compare-against picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefEntry {
+    /// The name used as a revision (e.g. `main`, `origin/main`, `v1.2.0`).
+    pub name: String,
+    pub kind: RefKind,
+}
+
 /// Old and new contents of a file; `None` on a side means the file is absent there
 /// (added → old `None`; deleted → new `None`).
 pub type FileBlobs = (Option<Vec<u8>>, Option<Vec<u8>>);
@@ -111,4 +138,8 @@ pub trait GitBackend {
     /// and the first of `candidates` that exists and differs from `HEAD`.
     /// `None` if no suitable base is found.
     fn detect_base(&self, candidates: &[String]) -> Result<Option<String>>;
+
+    /// All branches (local + remote) and tags, for the compare-against picker.
+    /// Order: local branches, then remote branches, then tags (each alpha).
+    fn list_refs(&self) -> Result<Vec<RefEntry>>;
 }

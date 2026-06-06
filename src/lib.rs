@@ -9,6 +9,7 @@ pub mod browser;
 pub mod cli;
 pub mod config;
 pub mod diff;
+pub mod fuzzy;
 pub mod git;
 pub mod highlight;
 pub mod review;
