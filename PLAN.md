@@ -12,7 +12,7 @@
 - [x] M1 — Git + diff model (no TUI)
 - [x] M2 — Core TUI (unified)
 - [x] M3 — Delta-style rendering
-- [ ] M4 — Tree + side-by-side
+- [x] M4 — Tree + side-by-side
 - [ ] M5 — Compare picker + smart + PR
 - [ ] M6 — Live watch + review state
 - [ ] M7 — DX polish (search, context expand, editor, theme, config, mouse)
@@ -106,12 +106,11 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] Style-aware snapshot tests (background-legend map) + word-toggle + syntax-fg + multibyte safety.
 - Deliverable: looks like delta.
 
-### M4 — Tree + side-by-side
-- [ ] Compact folder tree (collapse single-child dirs), expand/collapse, markers.
-- [ ] Tree viewport follows the selection (the M2 flat list doesn't scroll-follow;
-      selected file can go off-screen for large changesets — fix here).
-- [ ] `s` side-by-side viewer with line wrapping + alignment.
-- [ ] Snapshot tests for tree + split view.
+### M4 — Tree + side-by-side ✅
+- [x] Compact folder tree (collapse single-child dirs), expand/collapse (←/→/Enter), markers.
+- [x] Tree viewport follows the cursor (`tree_scroll`).
+- [x] `s` side-by-side viewer with aligned line wrapping (rows expand to the taller cell).
+- [x] Unit tests for tree building + snapshot tests for tree + split view.
 
 ### M5 — Compare picker + smart + PR
 - [ ] `c` compare-picker overlay; all `CompareSpec` variants wired through the backend.

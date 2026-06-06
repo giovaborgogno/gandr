@@ -186,6 +186,31 @@ fn m3_syntax_highlighting_sets_foreground() {
     );
 }
 
+// ---- M4: tree + side-by-side ----
+
+#[test]
+fn tree_shows_compacted_directories() {
+    let fx = Fixture::new();
+    fx.write("src/app/mod.rs", "fn run() {}\n");
+    fx.write("README.md", "# x\n");
+    fx.commit("init");
+    fx.write("src/app/mod.rs", "fn run() { go(); }\n");
+    fx.write("README.md", "# y\n");
+    let app = app_from(&fx);
+    insta::assert_snapshot!(frame(&app, 80, 12));
+}
+
+#[test]
+fn side_by_side_view_shows_two_columns() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "one\ntwo\nthree\n");
+    fx.commit("init");
+    fx.write("a.txt", "one\nTWO\nthree\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('s')); // switch to side-by-side
+    insta::assert_snapshot!(frame(&app, 80, 12));
+}
+
 #[test]
 fn m3_multibyte_and_long_lines_render_without_panic() {
     let fx = Fixture::new();

@@ -4,10 +4,13 @@ use crate::config::{Config, ViewMode};
 use crate::diff::FileDiff;
 use crate::git::{CompareSpec, RepoContext};
 use crate::ui;
+use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use std::cell::Cell;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// How long the loop blocks waiting for input before redrawing.
@@ -29,10 +32,16 @@ pub struct App {
     context: RepoContext,
     spec: CompareSpec,
     files: Vec<FileDiff>,
-    /// Index into `files` of the selected file.
+    /// Index into `files` of the selected file (the one shown in the viewer).
     selected: usize,
     /// First visible row of the diff viewer for the selected file.
     scroll: usize,
+    /// Collapsed directory paths in the file tree (absent = expanded).
+    collapsed: HashSet<PathBuf>,
+    /// Cursor over the tree's visible rows (dirs + files).
+    tree_cursor: usize,
+    /// First visible tree row (follows the cursor); updated at render.
+    tree_scroll: Cell<usize>,
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
     should_quit: bool,
@@ -46,6 +55,14 @@ impl App {
         files: Vec<FileDiff>,
     ) -> Self {
         let view = config.default_view;
+        let collapsed = HashSet::new();
+        // Start the cursor on the first file row (skipping leading directories).
+        let rows = tree::build_rows(&files, &collapsed);
+        let tree_cursor = rows
+            .iter()
+            .position(|r| r.file_index().is_some())
+            .unwrap_or(0);
+        let selected = rows.get(tree_cursor).and_then(Row::file_index).unwrap_or(0);
         Self {
             config,
             view,
@@ -53,8 +70,11 @@ impl App {
             context,
             spec,
             files,
-            selected: 0,
+            selected,
             scroll: 0,
+            collapsed,
+            tree_cursor,
+            tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
             should_quit: false,
         }
@@ -113,12 +133,37 @@ impl App {
 
     /// The contextual key hints at the bottom.
     pub fn keybar_line(&self) -> String {
-        "j/k move · Tab focus · n/p file · ]/[ hunk · s split · q quit · ? help".to_string()
+        "j/k move · Tab focus · n/p file · ]/[ hunk · ←/→ fold · s split · w word · q quit"
+            .to_string()
     }
 
     /// Let the renderer record the diff-viewport height for page math.
     pub fn set_viewport(&self, rows: usize) {
         self.viewport.set(rows);
+    }
+
+    // ---- file tree ----
+
+    /// The current visible tree rows (dirs + files, compacted + collapse-aware).
+    pub fn tree_rows(&self) -> Vec<Row> {
+        tree::build_rows(&self.files, &self.collapsed)
+    }
+
+    /// The cursor row in the tree.
+    pub fn tree_cursor(&self) -> usize {
+        self.tree_cursor
+    }
+
+    /// First visible tree row so the cursor stays on-screen for `height` rows.
+    pub fn tree_scroll(&self, height: usize) -> usize {
+        let mut s = self.tree_scroll.get();
+        if self.tree_cursor < s {
+            s = self.tree_cursor;
+        } else if height > 0 && self.tree_cursor >= s + height {
+            s = self.tree_cursor + 1 - height;
+        }
+        self.tree_scroll.set(s);
+        s
     }
 
     // ---- diff-row geometry (kept in sync with viewer_unified row layout) ----
@@ -150,20 +195,99 @@ impl App {
 
     // ---- mutations ----
 
-    fn select(&mut self, idx: usize) {
-        if self.files.is_empty() {
+    /// Point the viewer at the file under the tree cursor (if it's a file row).
+    fn sync_selection(&mut self) {
+        let rows = self.tree_rows();
+        if let Some(idx) = rows.get(self.tree_cursor).and_then(Row::file_index) {
+            if idx != self.selected {
+                self.selected = idx;
+                self.scroll = 0;
+            }
+        }
+    }
+
+    fn cursor_down(&mut self) {
+        let len = self.tree_rows().len();
+        if len == 0 {
             return;
         }
-        self.selected = idx.min(self.files.len() - 1);
-        self.scroll = 0;
+        self.tree_cursor = (self.tree_cursor + 1).min(len - 1);
+        self.sync_selection();
     }
 
-    fn select_next(&mut self) {
-        self.select(self.selected + 1);
+    fn cursor_up(&mut self) {
+        self.tree_cursor = self.tree_cursor.saturating_sub(1);
+        self.sync_selection();
     }
 
-    fn select_prev(&mut self) {
-        self.select(self.selected.saturating_sub(1));
+    /// Jump the cursor to the next/previous file row (skipping directories).
+    fn select_next_file(&mut self) {
+        let rows = self.tree_rows();
+        if let Some(pos) = rows
+            .iter()
+            .enumerate()
+            .skip(self.tree_cursor + 1)
+            .find(|(_, r)| r.file_index().is_some())
+            .map(|(i, _)| i)
+        {
+            self.tree_cursor = pos;
+            self.sync_selection();
+        }
+    }
+
+    fn select_prev_file(&mut self) {
+        let rows = self.tree_rows();
+        if let Some(pos) = rows
+            .iter()
+            .enumerate()
+            .take(self.tree_cursor)
+            .rev()
+            .find(|(_, r)| r.file_index().is_some())
+            .map(|(i, _)| i)
+        {
+            self.tree_cursor = pos;
+            self.sync_selection();
+        }
+    }
+
+    /// Toggle the directory under the cursor; collapse/expand explicitly.
+    fn set_dir_collapsed(&mut self, collapse: bool) {
+        let rows = self.tree_rows();
+        if let Some(Row {
+            kind: RowKind::Dir { path, expanded },
+            ..
+        }) = rows.get(self.tree_cursor)
+        {
+            if collapse && *expanded {
+                self.collapsed.insert(path.clone());
+            } else if !collapse && !*expanded {
+                self.collapsed.remove(path);
+            }
+            self.clamp_cursor();
+        }
+    }
+
+    fn toggle_dir(&mut self) {
+        let rows = self.tree_rows();
+        if let Some(Row {
+            kind: RowKind::Dir { path, expanded },
+            ..
+        }) = rows.get(self.tree_cursor)
+        {
+            if *expanded {
+                self.collapsed.insert(path.clone());
+            } else {
+                self.collapsed.remove(path);
+            }
+            self.clamp_cursor();
+        }
+    }
+
+    fn clamp_cursor(&mut self) {
+        let len = self.tree_rows().len();
+        if len > 0 && self.tree_cursor >= len {
+            self.tree_cursor = len - 1;
+        }
     }
 
     fn scroll_down(&mut self, n: usize) {
@@ -215,16 +339,27 @@ impl App {
             KeyCode::Char('u') if ctrl => self.scroll_up(half_page),
 
             KeyCode::Char('j') | KeyCode::Down => match self.focus {
-                Focus::Tree => self.select_next(),
+                Focus::Tree => self.cursor_down(),
                 Focus::Diff => self.scroll_down(1),
             },
             KeyCode::Char('k') | KeyCode::Up => match self.focus {
-                Focus::Tree => self.select_prev(),
+                Focus::Tree => self.cursor_up(),
                 Focus::Diff => self.scroll_up(1),
             },
 
-            KeyCode::Char('n') => self.select_next(),
-            KeyCode::Char('p') => self.select_prev(),
+            // Tree expand/collapse; Enter on a file focuses the diff.
+            KeyCode::Enter if self.focus == Focus::Tree => {
+                match self.tree_rows().get(self.tree_cursor).map(|r| &r.kind) {
+                    Some(RowKind::Dir { .. }) => self.toggle_dir(),
+                    Some(RowKind::File { .. }) => self.focus = Focus::Diff,
+                    None => {}
+                }
+            }
+            KeyCode::Right if self.focus == Focus::Tree => self.set_dir_collapsed(false),
+            KeyCode::Left if self.focus == Focus::Tree => self.set_dir_collapsed(true),
+
+            KeyCode::Char('n') => self.select_next_file(),
+            KeyCode::Char('p') => self.select_prev_file(),
             KeyCode::Char(']') => self.next_hunk(),
             KeyCode::Char('[') => self.prev_hunk(),
 

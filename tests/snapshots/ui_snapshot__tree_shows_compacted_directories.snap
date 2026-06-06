@@ -1,15 +1,13 @@
 ---
 source: tests/ui_snapshot.rs
-expression: "frame(&app, 80, 14)"
+expression: "frame(&app, 80, 12)"
 ---
 "gdiff · main · uncommitted · 2 files  +2 −2                                     "
 "┌Files (2)─────────────────────┐┌──────────────────────────────────────────────┐"
-"│M a.txt                       ││z.txt  +1 −1  [2/2]                           │"
-"│M z.txt                       ││@@ -1,1 +1,1 @@                               │"
-"│                              ││ 1    ▌ z                                     │"
-"│                              ││    1 ▌ z changed                             │"
-"│                              ││                                              │"
-"│                              ││                                              │"
+"│▾ src/app/                    ││src/app/mod.rs  +1 −1  [2/2]                  │"
+"│  M mod.rs                    ││@@ -1,1 +1,1 @@                               │"
+"│M README.md                   ││ 1    ▌ fn run() {}                           │"
+"│                              ││    1 ▌ fn run() { go(); }                    │"
 "│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"

@@ -3,9 +3,12 @@
 //! Render functions take immutable [`App`] state and draw into a ratatui `Frame`
 //! with no I/O, so they're snapshot-testable on `TestBackend` (see docs/testing.md).
 
+pub mod tree;
+pub mod viewer_split;
 pub mod viewer_unified;
 
 use crate::app::{App, Focus};
+use crate::config::ViewMode;
 use crate::diff::FileDiff;
 use crate::highlight::{Highlighter, Palette};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -14,8 +17,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-/// Width of the file list panel, in columns.
-const TREE_WIDTH: u16 = 30;
+/// Width of the file tree panel, in columns.
+const TREE_WIDTH: u16 = 32;
 
 /// Border highlight when a pane is focused.
 fn border_style(focused: bool) -> Style {
@@ -43,10 +46,10 @@ pub fn render(app: &App, f: &mut Frame) {
         header,
     );
 
-    let [tree, viewer] =
+    let [tree_area, viewer] =
         Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)]).areas(body);
 
-    render_file_list(app, f, tree);
+    render_file_list(app, f, tree_area);
     render_viewer(app, f, viewer);
 
     f.render_widget(
@@ -58,29 +61,24 @@ pub fn render(app: &App, f: &mut Frame) {
     );
 }
 
-/// The left panel: a flat list of changed files (the compact tree lands in M4).
+/// The left panel: the compact file tree.
 fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
     let block = Block::bordered()
         .title(format!("Files ({})", app.files().len()))
         .border_style(border_style(app.focus() == Focus::Tree));
+
     let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    for (i, file) in app.files().iter().enumerate() {
-        let selected = i == app.selected();
-        let marker = file.change.status.marker();
-        let path = file.change.path.to_string_lossy();
-        let text = format!("{marker} {path}");
-
-        let style = if selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(text, style)));
-    }
-    f.render_widget(Paragraph::new(lines), inner);
+    let rows = app.tree_rows();
+    let scroll = app.tree_scroll(inner.height as usize);
+    tree::render(
+        f,
+        area,
+        app.files(),
+        &rows,
+        app.tree_cursor(),
+        scroll,
+        block,
+    );
 }
 
 /// The right panel: a sticky file header plus the scrollable diff body.
@@ -108,15 +106,15 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
 
     let hl = Highlighter::for_path(&file.change.path);
     let palette = Palette::default();
-    viewer_unified::render(
-        f,
-        diff_body,
-        file,
-        app.scroll(),
-        &hl,
-        &palette,
-        app.config().word_diff,
-    );
+    let word_on = app.config().word_diff;
+    match app.view() {
+        ViewMode::Unified => {
+            viewer_unified::render(f, diff_body, file, app.scroll(), &hl, &palette, word_on)
+        }
+        ViewMode::SideBySide => {
+            viewer_split::render(f, diff_body, file, app.scroll(), &hl, &palette, word_on)
+        }
+    }
 }
 
 /// The sticky one-line file header: path, per-file counts, and position.
