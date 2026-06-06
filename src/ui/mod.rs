@@ -111,13 +111,14 @@ pub fn render(app: &App, f: &mut Frame) {
     );
 
     match app.tab() {
-        Tab::Diff => {
+        Tab::Diff if app.show_tree() => {
             let [tree_area, viewer] =
                 Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)])
                     .areas(body);
             render_file_list(app, f, tree_area);
             render_viewer(app, f, viewer);
         }
+        Tab::Diff => render_viewer(app, f, body), // tree hidden → full-width diff
         Tab::Files => browser::render(app, f, body),
     }
 
@@ -398,6 +399,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),
         ("1 / 2", "Diff / Files tab"),
+        ("z", "hide / show the tree panel"),
         ("? / q", "help · quit"),
     ];
 

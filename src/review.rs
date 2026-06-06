@@ -54,9 +54,11 @@ pub fn diff_hash(file: &FileDiff) -> u64 {
 }
 
 impl ReviewState {
-    /// Where the state file lives for a repo at `repo_root`.
-    pub fn state_path(repo_root: &Path) -> PathBuf {
-        repo_root.join(".git").join("gdiff").join("state.json")
+    /// Where the state file lives, under the repo's git directory. `git_dir` is
+    /// libgit2's resolved path (handles worktrees/submodules where `.git` is a
+    /// file), so the `gdiff/` subdir is always creatable.
+    pub fn state_path(git_dir: &Path) -> PathBuf {
+        git_dir.join("gdiff").join("state.json")
     }
 
     /// Load from disk, returning an empty state if missing or unreadable.

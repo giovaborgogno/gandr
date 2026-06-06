@@ -13,6 +13,10 @@ use ratatui::Frame;
 const TREE_WIDTH: u16 = 36;
 
 pub fn render(app: &App, f: &mut Frame, area: Rect) {
+    if !app.show_tree() {
+        render_content(app, f, area); // tree hidden → full-width content
+        return;
+    }
     let [tree_area, content_area] =
         Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)]).areas(area);
     render_tree(app, f, tree_area);

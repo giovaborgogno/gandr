@@ -535,6 +535,47 @@ fn diff_highlight_invalidates_on_same_path_edit() {
     assert_eq!(after.len(), 3);
 }
 
+// ---- tree navigation & hide toggle ----
+
+#[test]
+fn z_hides_the_tree_panel() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    assert!(
+        frame(&app, 80, 10).contains("Changes"),
+        "tree shown by default"
+    );
+    app.handle_key(key('z'));
+    assert!(
+        !frame(&app, 80, 10).contains("Changes"),
+        "z should hide the Changes/tree panel"
+    );
+    app.handle_key(key('z'));
+    assert!(frame(&app, 80, 10).contains("Changes"), "z toggles it back");
+}
+
+#[test]
+fn h_l_collapse_and_expand_dirs_in_files_tab() {
+    let fx = Fixture::new();
+    fx.write("src/lib.rs", "pub fn f() {}\n");
+    fx.commit("init");
+    fx.write("a.txt", "x\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab; cursor on first row (a dir, e.g. src)
+                              // `l` expands the dir under the cursor, `h` collapses it — same as →/←.
+    app.handle_key(key('l'));
+    let expanded = frame(&app, 90, 14);
+    app.handle_key(key('h'));
+    let collapsed = frame(&app, 90, 14);
+    assert_ne!(
+        expanded, collapsed,
+        "h/l should collapse/expand a directory in the Files tree"
+    );
+}
+
 // ---- edge cases: render without panic ----
 
 #[test]

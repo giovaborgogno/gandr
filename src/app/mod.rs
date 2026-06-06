@@ -143,6 +143,8 @@ pub struct App {
     theme_mode: ThemeMode,
     /// The active top-level tab.
     tab: Tab,
+    /// Whether the left tree/list panel is shown (`z` toggles it for full-width).
+    show_tree: bool,
     /// The Files-tab repo browser.
     browser: Browser,
     /// Whether the help overlay is shown.
@@ -218,7 +220,7 @@ impl App {
         let context = backend.context()?;
         let files = engine::build_diffs(backend.as_ref(), &spec, config.context_lines)?;
         let view = config.default_view;
-        let review_path = ReviewState::state_path(&context.root);
+        let review_path = ReviewState::state_path(&context.git_dir);
         let review = ReviewState::load(&review_path);
         let auto_refresh = config.auto_refresh;
         let browser = Browser::new(context.root.clone());
@@ -257,6 +259,7 @@ impl App {
             loading: false,
             theme_mode: ThemeMode::Dark,
             tab: Tab::Diff,
+            show_tree: true,
             browser,
             show_help: false,
             search: None,
@@ -315,6 +318,9 @@ impl App {
     }
     pub fn tab(&self) -> Tab {
         self.tab
+    }
+    pub fn show_tree(&self) -> bool {
+        self.show_tree
     }
     pub fn browser(&self) -> &Browser {
         &self.browser
@@ -1322,6 +1328,14 @@ impl App {
                 self.pending_search = None;
                 return;
             }
+            // Toggle the tree/list panel to give the diff/content the full width.
+            KeyCode::Char('z') => {
+                self.show_tree = !self.show_tree;
+                if !self.show_tree {
+                    self.focus = Focus::Diff; // nothing to focus on a hidden tree
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -1386,8 +1400,12 @@ impl App {
             }
             // In the diff, Enter expands the fold nearest the top of the viewport.
             KeyCode::Enter if self.focus == Focus::Diff => self.expand_active_fold(),
-            KeyCode::Right if self.focus == Focus::Tree => self.set_dir_collapsed(false),
-            KeyCode::Left if self.focus == Focus::Tree => self.set_dir_collapsed(true),
+            KeyCode::Right | KeyCode::Char('l') if self.focus == Focus::Tree => {
+                self.set_dir_collapsed(false)
+            }
+            KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Tree => {
+                self.set_dir_collapsed(true)
+            }
 
             KeyCode::Char('n') => self.select_next_file(),
             KeyCode::Char('p') => self.select_prev_file(),
@@ -1428,8 +1446,8 @@ impl App {
                     self.focus = Focus::Diff; // focus the content pane
                 }
             }
-            KeyCode::Right => self.browser.expand_or_open(),
-            KeyCode::Left => self.browser.collapse(),
+            KeyCode::Right | KeyCode::Char('l') => self.browser.expand_or_open(),
+            KeyCode::Left | KeyCode::Char('h') => self.browser.collapse(),
             _ => {}
         }
     }

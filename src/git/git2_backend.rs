@@ -177,7 +177,14 @@ impl GitBackend for Git2Backend {
             .head()
             .ok()
             .and_then(|head| head.shorthand().map(str::to_string).ok());
-        Ok(RepoContext { root, branch })
+        // `repo.path()` is the actual git dir (e.g. `.git/worktrees/<name>` for a
+        // linked worktree), so review state lands somewhere that exists.
+        let git_dir = self.repo.path().to_path_buf();
+        Ok(RepoContext {
+            root,
+            git_dir,
+            branch,
+        })
     }
 
     fn changed_files(&self, spec: &CompareSpec) -> Result<Vec<FileChange>> {

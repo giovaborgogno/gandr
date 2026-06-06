@@ -88,7 +88,12 @@ pub struct FileChange {
 /// Repo-level context for the header line.
 #[derive(Debug, Clone)]
 pub struct RepoContext {
+    /// Working-tree root.
     pub root: PathBuf,
+    /// The repository's git directory (libgit2's resolved path — the real one
+    /// for worktrees/submodules, where `<root>/.git` is a file, not a dir). This
+    /// is where gdiff persists its review state.
+    pub git_dir: PathBuf,
     pub branch: Option<String>,
 }
 
