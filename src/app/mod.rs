@@ -882,13 +882,20 @@ impl App {
         self.editor_request.take()
     }
 
-    /// Queue opening the selected file in `$EDITOR` near its first change.
+    /// Queue opening the selected file in `$EDITOR`. In the Diff tab this is the
+    /// selected change near its first hunk; in the Files tab it's the previewed
+    /// file near the top of the viewport.
     fn open_editor(&mut self) {
-        if let Some(file) = self.current() {
-            let line = file.hunks.first().map(|h| h.new_start).unwrap_or(1);
-            let path = self.context.root.join(&file.change.path);
-            self.editor_request = Some((path, line));
-        }
+        self.editor_request = match self.tab {
+            Tab::Diff => self.current().map(|f| {
+                let line = f.hunks.first().map(|h| h.new_start).unwrap_or(1);
+                (self.context.root.join(&f.change.path), line)
+            }),
+            Tab::Files => self
+                .browser
+                .loaded()
+                .map(|l| (l.path.clone(), self.browser.content_scroll() as u32 + 1)),
+        };
     }
 
     /// Display-row offsets of lines matching the search query (folds skipped).
@@ -1423,6 +1430,7 @@ impl App {
     fn handle_files_key(&mut self, key: KeyEvent, ctrl: bool) {
         match key.code {
             KeyCode::Char('/') => self.open_repo_search(),
+            KeyCode::Char('e') => self.open_editor(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,
@@ -1477,7 +1485,10 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
 
     // One channel the UI loop blocks on: terminal input + job results + file changes.
     let (tx, rx) = crossbeam_channel::unbounded::<jobs::AppEvent>();
-    jobs::spawn_input(tx.clone());
+    // Pauses the input reader while $EDITOR runs so it doesn't steal the child's
+    // keystrokes (otherwise nvim is unusable — can't type or quit).
+    let input_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    jobs::spawn_input(tx.clone(), std::sync::Arc::clone(&input_paused));
 
     // Watch the working tree (best-effort), forwarding changes onto the channel.
     let watch = watcher::watch(&root).ok();
@@ -1493,7 +1504,7 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     }
 
     let mut terminal = ratatui::try_init()?;
-    let result = run_loop(&mut app, &mut terminal, &rx, &tx, &root);
+    let result = run_loop(&mut app, &mut terminal, &rx, &tx, &root, &input_paused);
     ratatui::restore();
     drop(watch); // stop watching
     result
@@ -1505,6 +1516,7 @@ fn run_loop(
     rx: &crossbeam_channel::Receiver<jobs::AppEvent>,
     tx: &crossbeam_channel::Sender<jobs::AppEvent>,
     root: &std::path::Path,
+    input_paused: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     // Event-driven: redraw only when something changed; heavy work runs on
     // background threads and posts results as events.
@@ -1574,9 +1586,14 @@ fn run_loop(
             Err(_) => break,
         }
 
-        // Honor a queued editor request: suspend the TUI, run the editor, resume.
+        // Honor a queued editor request: suspend the TUI + pause the input reader
+        // (so the editor — not gdiff — receives keystrokes), run it, then resume.
         if let Some((path, line)) = app.take_editor_request() {
-            launch_editor(terminal, &path, line)?;
+            use std::sync::atomic::Ordering;
+            input_paused.store(true, Ordering::Release);
+            let r = launch_editor(terminal, &path, line);
+            input_paused.store(false, Ordering::Release);
+            r?;
             dirty = true;
         }
     }

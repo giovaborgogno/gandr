@@ -17,6 +17,8 @@ use anyhow::Result;
 use crossbeam_channel::Sender;
 use crossterm::event::Event as TermEvent;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Everything the UI loop reacts to, on one channel.
 pub enum AppEvent {
@@ -45,12 +47,37 @@ pub enum AppEvent {
 
 /// Forward terminal input on a background thread so the UI loop can block on a
 /// single channel instead of polling.
-pub fn spawn_input(tx: Sender<AppEvent>) {
-    std::thread::spawn(move || {
-        while let Ok(ev) = crossterm::event::read() {
-            if tx.send(AppEvent::Term(ev)).is_err() {
-                break; // UI loop gone
+///
+/// While `paused` is set, the thread does NOT read stdin — it `poll`s so it can
+/// observe the flag, but leaves input on the terminal for a child process (e.g.
+/// `$EDITOR`). Without this, this thread races the editor for keystrokes, making
+/// it impossible to type/quit (nvim feels broken). `poll` returns immediately on
+/// real input, so active keypress latency is unaffected; the timeout only bounds
+/// how quickly the pause flag is observed.
+pub fn spawn_input(tx: Sender<AppEvent>, paused: Arc<AtomicBool>) {
+    use std::time::Duration;
+    std::thread::spawn(move || loop {
+        if paused.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        match crossterm::event::poll(Duration::from_millis(50)) {
+            Ok(true) => {
+                // Re-check: don't consume input meant for a child started since poll.
+                if paused.load(Ordering::Acquire) {
+                    continue;
+                }
+                match crossterm::event::read() {
+                    Ok(ev) => {
+                        if tx.send(AppEvent::Term(ev)).is_err() {
+                            break; // UI loop gone
+                        }
+                    }
+                    Err(_) => break,
+                }
             }
+            Ok(false) => {} // timeout: loop to re-check the pause flag
+            Err(_) => break,
         }
     });
 }
