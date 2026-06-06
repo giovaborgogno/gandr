@@ -91,6 +91,27 @@ fn main() -> Result<()> {
         }
         app.handle_key(enter);
     }
+    if has("showcase") {
+        // A change with a very long line, to show the cursor + wrapping.
+        fx.write(
+            "src/app/main.rs",
+            "fn main() {\n    let greeting = \"hello\";\n    println!(\"{greeting}\");\n}\n",
+        );
+        fx.commit("seed2");
+        fx.write(
+            "src/app/main.rs",
+            "fn main() {\n    let greeting = \"a deliberately long line that does not fit the panel and must wrap onto the next row instead of being truncated at the edge\";\n    println!(\"{greeting}\");\n}\n",
+        );
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // focus diff → cursor
+        if has("hidetree") {
+            app.handle_key(key('z'));
+        }
+        app.handle_key(key('j')); // move the cursor down a line
+        app.handle_key(key('j'));
+    }
     if has("reposearch") {
         let root = app.context().root.clone();
         app.handle_key(key('2')); // Files tab
