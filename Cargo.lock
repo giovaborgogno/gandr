@@ -590,6 +590,8 @@ dependencies = [
  "notify",
  "notify-debouncer-mini",
  "ratatui",
+ "serde",
+ "serde_json",
  "syntect",
  "tempfile",
  "termbg",

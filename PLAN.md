@@ -14,7 +14,7 @@
 - [x] M3 — Delta-style rendering
 - [x] M4 — Tree + side-by-side
 - [x] M5 — Compare picker + smart + PR
-- [ ] M6 — Live watch + review state
+- [x] M6 — Live watch + review state
 - [ ] M7 — DX polish (search, context expand, editor, theme, config, mouse)
 
 Legend for sub-tasks: `[ ]` todo, `[x]` done.
@@ -121,11 +121,13 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] Tests: cli parsing, all backend comparison kinds, detect_base, picker overlay snapshot.
 - Note: path scoping (`gdiff <path>`) deferred (ref/path disambiguation) — see backlog.
 
-### M6 — Live watch + review state
-- [ ] notify + debouncer auto-refresh (working-tree comparisons), preserving scroll/selection.
-- [ ] Review state persisted to `.git/gdiff/state.json`, keyed by comparison.
-- [ ] Changed-since-reviewed `⚠` badge logic.
-- [ ] "updated" flash; `a` toggles auto-refresh; `r` manual refresh.
+### M6 — Live watch + review state ✅
+- [x] notify + debouncer auto-refresh (working-tree comparisons), preserving selection + scroll.
+- [x] Review state persisted to `.git/gdiff/state.json` (serde_json), keyed by comparison.
+- [x] Changed-since-reviewed `⚠` badge (content-hash); `✓` reviewed; `N/M reviewed` in header.
+- [x] `Space` review, `a` toggles auto-refresh, `r` manual refresh; `◉ watching` indicator.
+- [x] Review status cached (recomputed on refresh/toggle/spec-change, not per frame).
+- Note: a transient "updated" flash was dropped in favor of the steady `◉ watching` indicator.
 
 ### M7 — DX polish
 - [ ] Contextual search (`/`) + match nav; context expand (`o` / "expand context").

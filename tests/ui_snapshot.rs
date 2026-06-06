@@ -208,6 +208,54 @@ fn side_by_side_view_shows_two_columns() {
     insta::assert_snapshot!(frame(&app, 80, 12));
 }
 
+// ---- M6: review state + refresh ----
+
+#[test]
+fn reviewing_a_file_shows_check_in_tree() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key(' ')); // mark the selected file reviewed
+    insta::assert_snapshot!(frame(&app, 70, 10));
+}
+
+#[test]
+fn changed_after_review_is_flagged() {
+    use gdiff::review::ReviewStatus;
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+
+    app.handle_key(key(' ')); // review (diff is x→y)
+    assert_eq!(app.review_statuses(), vec![ReviewStatus::Reviewed]);
+
+    fx.write("a.txt", "z\n"); // the file changes again on disk
+    app.refresh();
+    assert_eq!(
+        app.review_statuses(),
+        vec![ReviewStatus::ChangedSinceReviewed]
+    );
+}
+
+#[test]
+fn refresh_preserves_selected_file() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "a\n");
+    fx.write("z.txt", "z\n");
+    fx.commit("init");
+    fx.write("a.txt", "a1\n");
+    fx.write("z.txt", "z1\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('n')); // select z.txt (second file)
+    let before = app.selected();
+    app.refresh();
+    assert_eq!(app.selected(), before);
+}
+
 // ---- M5: compare picker ----
 
 #[test]

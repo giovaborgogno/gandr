@@ -10,5 +10,6 @@ pub mod config;
 pub mod diff;
 pub mod git;
 pub mod highlight;
+pub mod review;
 pub mod testutil;
 pub mod ui;

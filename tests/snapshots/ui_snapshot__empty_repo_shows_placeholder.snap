@@ -2,7 +2,7 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 12)"
 ---
-"gdiff · main · uncommitted · 0 files  +0 −0                                     "
+"gdiff · main · uncommitted · 0 files  +0 −0 · 0/0 reviewed · ◉ watching         "
 "┌Files (0)─────────────────────┐┌──────────────────────────────────────────────┐"
 "│                              ││No uncommitted changes. Press `c` to compare a│"
 "│                              ││                                              │"
@@ -13,4 +13,4 @@ expression: "frame(&app, 80, 12)"
 "│                              ││                                              │"
 "│                              ││                                              │"
 "└──────────────────────────────┘└──────────────────────────────────────────────┘"
-"j/k move · Tab focus · n/p file · ]/[ hunk · c compare · s split · w word · q qu"
+"Space review · c compare · s split · w word · r refresh · a auto · ? help · q qu"

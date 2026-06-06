@@ -115,6 +115,7 @@ fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
         area,
         app.files(),
         &rows,
+        app.review_statuses(),
         app.tree_cursor(),
         scroll,
         block,

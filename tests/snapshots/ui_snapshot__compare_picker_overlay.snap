@@ -2,9 +2,9 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 70, 14)"
 ---
-"gdiff · main · uncommitted · 1 file  +1 −1                            "
+"gdiff · main · uncommitted · 1 file  +1 −1 · 0/1 reviewed · ◉ watching"
 "┌Files (1)─────────────────────┐┌────────────────────────────────────┐"
-"│M a.txt                       ││a.txt  +1 −1  [1/1]                 │"
+"│  M a.txt                     ││a.txt  +1 −1  [1/1]                 │"
 "│                              ││@@ -1,1 +1,1 @@                     │"
 "│              ┌Compare against…──────────────────────┐              │"
 "│              │ Uncommitted (vs HEAD)                │              │"
@@ -15,4 +15,4 @@ expression: "frame(&app, 70, 14)"
 "│                              ││                                    │"
 "│                              ││                                    │"
 "└──────────────────────────────┘└────────────────────────────────────┘"
-"j/k move · Tab focus · n/p file · ]/[ hunk · c compare · s split · w w"
+"Space review · c compare · s split · w word · r refresh · a auto · ? h"

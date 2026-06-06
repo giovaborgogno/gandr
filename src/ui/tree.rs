@@ -4,6 +4,7 @@
 
 use crate::diff::FileDiff;
 use crate::git::Status;
+use crate::review::ReviewStatus;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -133,13 +134,25 @@ fn marker_color(files: &[FileDiff], index: usize) -> Color {
     }
 }
 
+/// Review marker span (✓ reviewed, ⚠ changed-since, blank otherwise).
+fn review_span(status: ReviewStatus, row_style: Style) -> Span<'static> {
+    match status {
+        ReviewStatus::Reviewed => Span::styled("✓ ", row_style.fg(Color::Green)),
+        ReviewStatus::ChangedSinceReviewed => Span::styled("⚠ ", row_style.fg(Color::Yellow)),
+        ReviewStatus::Unreviewed => Span::styled("  ", row_style),
+    }
+}
+
 /// Render the file tree into `area`. `cursor` is the selected visible-row index;
-/// `scroll` is the first visible row (the panel scrolls to follow the cursor).
+/// `scroll` is the first visible row (the panel scrolls to follow the cursor);
+/// `statuses` holds the per-file review status, indexed by file index.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     files: &[FileDiff],
     rows: &[Row],
+    statuses: &[ReviewStatus],
     cursor: usize,
     scroll: usize,
     block: Block,
@@ -166,13 +179,21 @@ pub fn render(
                     row_style.fg(Color::Blue),
                 )]
             }
-            RowKind::File { index } => vec![
-                Span::styled(
-                    format!("{indent}{} ", status_marker(files, *index)),
-                    row_style.fg(marker_color(files, *index)),
-                ),
-                Span::styled(row.label.clone(), row_style),
-            ],
+            RowKind::File { index } => {
+                let status = statuses
+                    .get(*index)
+                    .copied()
+                    .unwrap_or(ReviewStatus::Unreviewed);
+                vec![
+                    Span::styled(indent, row_style),
+                    review_span(status, row_style),
+                    Span::styled(
+                        format!("{} ", status_marker(files, *index)),
+                        row_style.fg(marker_color(files, *index)),
+                    ),
+                    Span::styled(row.label.clone(), row_style),
+                ]
+            }
         };
         lines.push(Line::from(spans));
     }

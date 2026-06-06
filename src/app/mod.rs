@@ -1,8 +1,11 @@
 //! Application state, the event loop, and key dispatch.
 
+pub mod watcher;
+
 use crate::config::{Config, ViewMode};
 use crate::diff::{engine, FileDiff};
 use crate::git::{base, CompareSpec, GitBackend, RepoContext};
+use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
@@ -72,6 +75,14 @@ pub struct App {
     viewport: Cell<usize>,
     /// The compare picker overlay, when open.
     picker: Option<Picker>,
+    /// Persisted review state + where it lives.
+    review: ReviewState,
+    review_path: PathBuf,
+    /// Cached per-file review status (recomputed on refresh/toggle/spec change,
+    /// not every frame — diff hashing is O(diff size)).
+    review_cache: Vec<ReviewStatus>,
+    /// Whether file changes auto-refresh the diff (working-tree comparisons).
+    auto_refresh: bool,
     should_quit: bool,
 }
 
@@ -91,6 +102,9 @@ impl App {
         let context = backend.context()?;
         let files = engine::build_diffs(backend.as_ref(), &spec, config.context_lines)?;
         let view = config.default_view;
+        let review_path = ReviewState::state_path(&context.root);
+        let review = ReviewState::load(&review_path);
+        let auto_refresh = config.auto_refresh;
 
         let mut app = Self {
             config,
@@ -109,9 +123,14 @@ impl App {
             tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
             picker: None,
+            review,
+            review_path,
+            review_cache: Vec::new(),
+            auto_refresh,
             should_quit: false,
         };
         app.reset_view();
+        app.recompute_review();
         Ok(app)
     }
 
@@ -141,6 +160,40 @@ impl App {
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
+    pub fn auto_refresh(&self) -> bool {
+        self.auto_refresh
+    }
+    /// Whether the current comparison watches the working tree.
+    pub fn spec_is_live(&self) -> bool {
+        self.spec.is_live()
+    }
+
+    /// The comparison key under which review state is stored.
+    fn review_key(&self) -> String {
+        self.spec.label()
+    }
+
+    /// Per-file review status, indexed to match `files()` (from the cache).
+    pub fn review_statuses(&self) -> &[ReviewStatus] {
+        &self.review_cache
+    }
+
+    /// Recompute the cached review status for every file.
+    fn recompute_review(&mut self) {
+        let key = self.review_key();
+        self.review_cache = self
+            .files
+            .iter()
+            .map(|f| self.review.status(&key, &f.change.path, diff_hash(f)))
+            .collect();
+    }
+
+    fn reviewed_count(&self) -> usize {
+        self.review_cache
+            .iter()
+            .filter(|s| **s == ReviewStatus::Reviewed)
+            .count()
+    }
 
     /// The currently selected file's diff, if any.
     pub fn current(&self) -> Option<&FileDiff> {
@@ -161,7 +214,15 @@ impl App {
         let n = self.files.len();
         let files = if n == 1 { "file" } else { "files" };
         let label = self.title.clone().unwrap_or_else(|| self.spec.label());
-        format!("gdiff · {branch} · {label} · {n} {files}  +{add} −{del}")
+        let reviewed = self.reviewed_count();
+        let watch = if self.auto_refresh && self.spec.is_live() {
+            " · ◉ watching"
+        } else {
+            ""
+        };
+        format!(
+            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}"
+        )
     }
 
     /// The contextual key hints at the bottom (or the last error, if any).
@@ -169,7 +230,7 @@ impl App {
         if let Some(err) = &self.error {
             return format!("⚠ {err}");
         }
-        "j/k move · Tab focus · n/p file · ]/[ hunk · c compare · s split · w word · q quit"
+        "Space review · c compare · s split · w word · r refresh · a auto · ? help · q quit"
             .to_string()
     }
 
@@ -373,8 +434,54 @@ impl App {
                 self.files = files;
                 self.collapsed.clear();
                 self.reset_view();
+                self.recompute_review();
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Recompute the diff for the current comparison, preserving the selected
+    /// file (by path) and scroll where possible. Used by `r` and the watcher.
+    pub fn refresh(&mut self) {
+        let prev_path = self.current().map(|f| f.change.path.clone());
+        let prev_scroll = self.scroll;
+        match engine::build_diffs(self.backend.as_ref(), &self.spec, self.config.context_lines) {
+            Ok(files) => {
+                self.files = files;
+                self.error = None;
+                if let Some(idx) =
+                    prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
+                {
+                    self.selected = idx;
+                    if let Some(c) = self
+                        .tree_rows()
+                        .iter()
+                        .position(|r| r.file_index() == Some(idx))
+                    {
+                        self.tree_cursor = c;
+                    }
+                    self.scroll = prev_scroll.min(self.max_scroll());
+                } else {
+                    self.reset_view();
+                }
+                self.recompute_review();
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Toggle review of the selected file and persist.
+    fn toggle_review(&mut self) {
+        let info = self
+            .current()
+            .map(|f| (f.change.path.clone(), diff_hash(f)));
+        if let Some((path, hash)) = info {
+            let key = self.review_key();
+            self.review.toggle(&key, &path, hash);
+            if let Err(e) = self.review.save(&self.review_path) {
+                self.error = Some(format!("save review state: {e}"));
+            }
+            self.recompute_review();
         }
     }
 
@@ -479,6 +586,9 @@ impl App {
             }
             KeyCode::Char('s') => self.view = self.view.toggled(),
             KeyCode::Char('w') => self.config.word_diff = !self.config.word_diff,
+            KeyCode::Char(' ') => self.toggle_review(),
+            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('a') => self.auto_refresh = !self.auto_refresh,
 
             KeyCode::Char('d') if ctrl => self.scroll_down(half_page),
             KeyCode::Char('u') if ctrl => self.scroll_up(half_page),
@@ -526,15 +636,36 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     let resolved = base::resolve(&backend, inv.spec, smart, &config.base_branches)?;
 
     let mut app = App::with_title(config, Box::new(backend), resolved.spec, resolved.title)?;
+
+    // Watch the working tree for live auto-refresh (best-effort).
+    let root = app.context().root.clone();
+    let watch = watcher::watch(&root).ok();
+
     let mut terminal = ratatui::try_init()?;
-    let result = run_loop(&mut app, &mut terminal);
+    let result = run_loop(&mut app, &mut terminal, watch.as_ref());
     ratatui::restore();
     result
 }
 
-fn run_loop(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
+fn run_loop(
+    app: &mut App,
+    terminal: &mut DefaultTerminal,
+    watch: Option<&watcher::Watcher>,
+) -> Result<()> {
     while !app.should_quit() {
         terminal.draw(|f| app.render(f))?;
+
+        // Drain pending file-change notifications; refresh once if any apply.
+        if let Some(w) = watch {
+            let mut changed = false;
+            while w.rx.try_recv().is_ok() {
+                changed = true;
+            }
+            if changed && app.auto_refresh() && app.spec_is_live() {
+                app.refresh();
+            }
+        }
+
         if event::poll(TICK)? {
             if let Event::Key(key) = event::read()? {
                 app.handle_key(key);

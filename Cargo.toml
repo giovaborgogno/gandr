@@ -34,6 +34,10 @@ crossbeam-channel = "0.5"
 # Errors
 anyhow = "1"
 
+# Review-state persistence (.git/gdiff/state.json)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # Temp git repos for the `testutil` fixture helper (used by tests + examples,
 # never by the binary's real code path).
 tempfile = "3"
