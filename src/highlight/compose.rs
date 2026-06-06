@@ -88,7 +88,13 @@ pub fn line_spans(
         bounds.insert(*s);
         bounds.insert(*e);
     }
-    let points: Vec<usize> = bounds.into_iter().collect();
+    // Only slice on char boundaries: span/segment offsets come from this same
+    // text so they align in practice, but filtering guarantees `text[a..b]` can
+    // never panic on multibyte input (defense-in-depth, rule #1: no panics).
+    let points: Vec<usize> = bounds
+        .into_iter()
+        .filter(|&p| text.is_char_boundary(p))
+        .collect();
 
     let mut spans = Vec::with_capacity(points.len());
     for win in points.windows(2) {

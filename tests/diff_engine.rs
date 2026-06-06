@@ -136,6 +136,29 @@ fn binary_file_has_no_hunks() {
 }
 
 #[test]
+fn very_large_file_is_not_diffed_inline() {
+    let fx = Fixture::new();
+    fx.write("base.txt", "x\n");
+    fx.commit("init");
+    // A valid-UTF-8 file over the 2 MB diff cap → treated like binary (no hunks,
+    // no retained text), so we never diff/highlight a multi-MB file.
+    let huge = "a\n".repeat(1_500_000); // 3 MB
+    fx.write("huge.txt", &huge);
+
+    let diffs = diffs(&fx);
+    let d = diffs
+        .iter()
+        .find(|d| d.change.path == Path::new("huge.txt"))
+        .unwrap();
+    assert!(
+        d.change.is_binary,
+        "over-cap file should skip the text diff"
+    );
+    assert!(d.hunks.is_empty());
+    assert!(d.new_text.is_empty(), "over-cap text must not be retained");
+}
+
+#[test]
 fn valid_utf8_with_nul_is_binary() {
     let fx = Fixture::new();
     fx.write("base.txt", "x\n");

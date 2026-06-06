@@ -975,8 +975,12 @@ impl App {
         }
     }
 
-    /// Open the repo-wide search overlay (defaults to content search).
+    /// Open the repo-wide search overlay (defaults to content search). Bumps the
+    /// search epoch so a result from a previous (closed) search can't land in the
+    /// freshly opened, empty overlay.
     fn open_repo_search(&mut self) {
+        self.search_epoch += 1;
+        self.pending_search = None;
         let mode = SearchMode::Content;
         self.repo_search = Some(RepoSearch {
             query: String::new(),
@@ -1567,9 +1571,18 @@ fn launch_editor(terminal: &mut DefaultTerminal, path: &std::path::Path, line: u
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".to_string());
 
+    // Split on whitespace so values with flags work (e.g. `code --wait`,
+    // `emacsclient -nw`); the first token is the program, the rest are args.
+    let mut parts = editor.split_whitespace();
+    let Some(program) = parts.next() else {
+        return Ok(()); // empty $EDITOR → nothing to launch
+    };
+    let extra: Vec<&str> = parts.collect();
+
     ratatui::restore();
-    let mut cmd = std::process::Command::new(&editor);
-    if editor.ends_with("code") || editor.ends_with("codium") {
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(&extra);
+    if program.ends_with("code") || program.ends_with("codium") {
         cmd.arg("-g").arg(format!("{}:{line}", path.display()));
     } else {
         cmd.arg(format!("+{line}")).arg(path);

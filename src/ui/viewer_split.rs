@@ -192,7 +192,7 @@ pub fn rows(
                 let region: Vec<&DiffLine> = display[start..i]
                     .iter()
                     .filter_map(|r| match r {
-                        DiffRow::Line(idx) => Some(&full[*idx]),
+                        DiffRow::Line(idx) => full.get(*idx),
                         DiffRow::Fold { .. } => None,
                     })
                     .collect();

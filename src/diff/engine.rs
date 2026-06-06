@@ -7,10 +7,20 @@ use crate::git::{CompareSpec, FileChange, GitBackend};
 use anyhow::Result;
 use imara_diff::{sources::lines, Algorithm, Diff, InternedInput};
 
+/// A side larger than this is not diffed inline — diffing + retaining + syntax
+/// highlighting multi-MB files would blow up memory and stall. Such a change is
+/// reported like a binary one (no text diff). Matches the Files-tab preview cap.
+const MAX_DIFF_BYTES: usize = 2_000_000;
+
 /// Whether a byte slice should be treated as binary: not valid UTF-8, or it
 /// contains a NUL byte.
 fn looks_binary(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_err() || bytes.contains(&0)
+}
+
+/// Whether a side is too large to diff inline (see [`MAX_DIFF_BYTES`]).
+fn too_large(bytes: &[u8]) -> bool {
+    bytes.len() > MAX_DIFF_BYTES
 }
 
 /// Decode a present side as UTF-8 text (empty for an absent side). Only called
@@ -232,8 +242,14 @@ pub fn build_file_diff(
     context: usize,
 ) -> FileDiff {
     // A side is binary if it isn't valid UTF-8 or contains a NUL byte (NUL is
-    // valid UTF-8 but a strong binary signal, mirroring git's heuristic).
-    if old.is_some_and(looks_binary) || new.is_some_and(looks_binary) {
+    // valid UTF-8 but a strong binary signal, mirroring git's heuristic). A side
+    // that's too large is treated the same way — no inline text diff — so we
+    // never diff/retain/highlight a multi-MB file.
+    if old.is_some_and(looks_binary)
+        || new.is_some_and(looks_binary)
+        || old.is_some_and(too_large)
+        || new.is_some_and(too_large)
+    {
         change.is_binary = true;
         change.additions = 0;
         change.deletions = 0;

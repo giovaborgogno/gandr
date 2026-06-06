@@ -186,6 +186,17 @@ Each milestone is independently runnable and ends in a commit. After each, run t
   doing it correctly there means highlighting the new file and the old file each
   in order (carrying state) and mapping spans to displayed lines by line number —
   needs the full old/new text available to the UI + caching (it isn't today).
+- **Async PR resolution** — `gh pr view` (network) runs synchronously on the
+  main thread in `base::resolve_pr` (compare-picker PR option, `--pr`, and the
+  smart fallback). On a hung network it blocks the UI; route it through the
+  job/epoch machinery like diff/search so it never freezes (a loading state).
+- **Range `...` (symmetric / merge-base) syntax** — `cli.rs` parses `a..b` but
+  treats `a...b` as `Range("a", ".b")` (confusing error). Support `...` (diff
+  against the merge-base) and give a clear message for empty endpoints.
+- **Pre-read blob size cap** — the 2 MB diff cap (`MAX_DIFF_BYTES`) bounds
+  *retention*, but `git2_backend` still reads each blob/file fully into memory
+  before the cap applies; check `blob.size()` / `metadata` first to avoid even
+  the transient allocation for a single enormous file.
 - **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.

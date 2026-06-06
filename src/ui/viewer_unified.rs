@@ -59,9 +59,16 @@ pub(crate) fn line_fg<'a>(
     old_hl: &'a [Vec<FgSpan>],
     new_hl: &'a [Vec<FgSpan>],
 ) -> &'a [FgSpan] {
+    // `checked_sub`: line numbers are 1-based, but never trust a `- 1` to a panic.
     let spans = match line.kind {
-        LineKind::Del => line.old_no.and_then(|n| old_hl.get(n as usize - 1)),
-        _ => line.new_no.and_then(|n| new_hl.get(n as usize - 1)),
+        LineKind::Del => line
+            .old_no
+            .and_then(|n| (n as usize).checked_sub(1))
+            .and_then(|i| old_hl.get(i)),
+        _ => line
+            .new_no
+            .and_then(|n| (n as usize).checked_sub(1))
+            .and_then(|i| new_hl.get(i)),
     };
     spans.map(Vec::as_slice).unwrap_or(&[])
 }
@@ -129,11 +136,15 @@ fn build_row(
 ) -> Line<'static> {
     match row {
         DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width),
-        DiffRow::Line(idx) => {
-            let line = &full[*idx];
-            let fg = line_fg(line, old_hl, new_hl);
-            line_row(line, w, width, fg, palette, word_on, query)
-        }
+        // `.get` rather than `full[*idx]`: indices come from a coherent display
+        // cache today, but a graceful empty row beats a panic if that ever slips.
+        DiffRow::Line(idx) => match full.get(*idx) {
+            Some(line) => {
+                let fg = line_fg(line, old_hl, new_hl);
+                line_row(line, w, width, fg, palette, word_on, query)
+            }
+            None => Line::from(""),
+        },
     }
 }
 

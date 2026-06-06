@@ -5,8 +5,18 @@
 use crate::diff::{FileDiff, LineKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+
+/// FNV-1a over a byte slice. A fixed, platform-stable hash — unlike
+/// `DefaultHasher` (SipHash with an unspecified, version-dependent result) — so
+/// review hashes persisted in `state.json` stay valid across toolchain upgrades
+/// and machines.
+fn fnv1a(state: &mut u64, bytes: &[u8]) {
+    for &b in bytes {
+        *state ^= b as u64;
+        *state = state.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+}
 
 /// Review state of a single file in the current comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,8 +37,8 @@ pub struct ReviewState {
 /// A stable hash of a file's diff content (path + each line's kind and text), used
 /// to detect whether a reviewed file changed afterwards.
 pub fn diff_hash(file: &FileDiff) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    file.change.path.hash(&mut h);
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+    fnv1a(&mut h, file.change.path.to_string_lossy().as_bytes());
     for hunk in &file.hunks {
         for line in &hunk.lines {
             let kind: u8 = match line.kind {
@@ -36,11 +46,11 @@ pub fn diff_hash(file: &FileDiff) -> u64 {
                 LineKind::Add => 1,
                 LineKind::Del => 2,
             };
-            kind.hash(&mut h);
-            line.text.hash(&mut h);
+            fnv1a(&mut h, &[kind]);
+            fnv1a(&mut h, line.text.as_bytes());
         }
     }
-    h.finish()
+    h
 }
 
 impl ReviewState {

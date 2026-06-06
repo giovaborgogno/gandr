@@ -546,7 +546,7 @@ fn binary_file_diff_shows_indicator() {
     let app = app_from(&fx);
     let out = frame(&app, 80, 12);
     assert!(
-        out.contains("Binary file"),
+        out.contains("No text diff"),
         "expected a binary indicator:\n{out}"
     );
 }
