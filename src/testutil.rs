@@ -24,10 +24,14 @@ impl Default for Fixture {
 }
 
 impl Fixture {
-    /// Create an empty repo with a deterministic identity configured.
+    /// Create an empty repo with a deterministic identity and branch configured.
+    /// The initial branch is fixed to `main` so snapshots don't depend on the
+    /// host's `init.defaultBranch`.
     pub fn new() -> Self {
         let dir = tempfile::tempdir().expect("create temp dir");
-        let repo = git2::Repository::init(dir.path()).expect("git init");
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("main");
+        let repo = git2::Repository::init_opts(dir.path(), &opts).expect("git init");
         {
             let mut cfg = repo.config().expect("repo config");
             cfg.set_str("user.name", "gdiff fixtures")

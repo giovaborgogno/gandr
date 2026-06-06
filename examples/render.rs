@@ -1,21 +1,37 @@
 //! Render a single gdiff frame to stdout as text, for headless inspection.
 //!
 //! `cargo run --example render` — the agent's "eyes" on the UI without a terminal.
-//! As the UI grows, accept a scenario name and build a matching fixture + state.
+//! Builds a small fixture repo, computes its diff, and renders one frame.
 
 use anyhow::Result;
 use gdiff::app::App;
 use gdiff::config::Config;
+use gdiff::diff::engine;
+use gdiff::git::git2_backend::Git2Backend;
+use gdiff::git::{CompareSpec, GitBackend};
+use gdiff::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 fn main() -> Result<()> {
-    let app = App::new(Config::default());
+    let fx = Fixture::new();
+    fx.write("src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n");
+    fx.write("README.md", "# demo\n\nold line\n");
+    fx.commit("init");
+    fx.write(
+        "src/main.rs",
+        "fn main() {\n    let name = \"world\";\n    println!(\"hi {name}\");\n}\n",
+    );
+    fx.write("README.md", "# demo\n\nnew line\n");
+    fx.write("notes.txt", "a brand new file\n");
+
+    let backend = Git2Backend::open(fx.path())?;
+    let context = backend.context()?;
+    let files = engine::build_diffs(&backend, &CompareSpec::Uncommitted, 3)?;
+    let app = App::new(Config::default(), context, CompareSpec::Uncommitted, files);
 
     let mut terminal = Terminal::new(TestBackend::new(100, 24))?;
     terminal.draw(|f| app.render(f))?;
-
-    // TestBackend's Display renders the buffer as quoted text rows.
     println!("{}", terminal.backend());
     Ok(())
 }

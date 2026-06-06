@@ -1,0 +1,16 @@
+---
+source: tests/ui_snapshot.rs
+expression: "frame(&app, 80, 12)"
+---
+"gdiff · main · uncommitted · 0 files  +0 −0                                     "
+"┌Files (0)───────────────────┐┌────────────────────────────────────────────────┐"
+"│                            ││No uncommitted changes. Press `c` to compare aga│"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"│                            ││                                                │"
+"└────────────────────────────┘└────────────────────────────────────────────────┘"
+"j/k move · Tab focus · n/p file · ]/[ hunk · s split · q quit · ? help          "

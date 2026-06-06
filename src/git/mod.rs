@@ -34,6 +34,19 @@ impl CompareSpec {
             CompareSpec::Uncommitted | CompareSpec::Staged | CompareSpec::WorkdirVs(_)
         )
     }
+
+    /// Short human label for the header line.
+    pub fn label(&self) -> String {
+        match self {
+            CompareSpec::Uncommitted => "uncommitted".to_string(),
+            CompareSpec::Staged => "staged".to_string(),
+            CompareSpec::WorkdirVs(r) => format!("vs {r}"),
+            CompareSpec::Range(a, b) => format!("{a}..{b}"),
+            CompareSpec::Commit(c) => format!("commit {c}"),
+            CompareSpec::Pr(Some(n)) => format!("PR #{n}"),
+            CompareSpec::Pr(None) => "PR".to_string(),
+        }
+    }
 }
 
 /// Per-file change status.

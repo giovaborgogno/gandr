@@ -5,7 +5,8 @@ use anyhow::Result;
 use gdiff::config::Config;
 
 fn main() -> Result<()> {
-    // M0: ignore CLI and run with defaults. Argument parsing → CompareSpec lands in M5.
-    let _invocation = gdiff::cli::parse();
-    gdiff::app::run(Config::default())
+    // Full argument grammar (refs, ranges, --pr, --smart) lands in M5; for now the
+    // CLI yields the default Uncommitted comparison.
+    let invocation = gdiff::cli::parse();
+    gdiff::app::run(Config::default(), invocation.spec)
 }

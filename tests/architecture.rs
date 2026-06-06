@@ -32,16 +32,18 @@ fn rust_files_outside_git(dir: &Path, git_dir: &Path, out: &mut Vec<std::path::P
     }
 }
 
-/// A line that uses git2 in code (not in a comment). We strip line/doc comments
-/// (`//`, `///`, `//!`) to avoid flagging prose that merely mentions the rule.
+/// A line that uses the `git2` crate in code (not in a comment). We look for the
+/// crate path `git2::`, which catches both `use git2::…` and qualified calls,
+/// while ignoring our own `git2_backend` module path and the `Git2Backend` type
+/// (the composition root is allowed to name the concrete backend). Line/doc
+/// comments are stripped so prose mentioning the rule doesn't trip it.
 fn uses_git2_in_code(line: &str) -> bool {
     let trimmed = line.trim_start();
     if trimmed.starts_with("//") {
         return false;
     }
-    // Drop any trailing `// ...` comment before checking.
     let code = trimmed.split("//").next().unwrap_or("");
-    code.contains("git2")
+    code.contains("git2::")
 }
 
 #[test]

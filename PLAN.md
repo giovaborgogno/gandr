@@ -10,7 +10,7 @@
 
 - [x] M0 — Scaffold + skeleton
 - [x] M1 — Git + diff model (no TUI)
-- [ ] M2 — Core TUI (unified)
+- [x] M2 — Core TUI (unified)
 - [ ] M3 — Delta-style rendering
 - [ ] M4 — Tree + side-by-side
 - [ ] M5 — Compare picker + smart + PR
@@ -92,11 +92,11 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] Temporary debug printer (`cargo run --example dump_diff`).
 - Deliverable: `cargo test` proves the engine produces correct diffs.
 
-### M2 — Core TUI (unified)
-- [ ] Layout: header / file list (flat first) / unified viewer / keybar.
-- [ ] Hybrid navigation (Tab focus; n/p file; ]/[ hunk; j/k/g/G/Ctrl-d/u).
-- [ ] Scroll + selection + sticky file header.
-- [ ] Snapshot tests for unified rendering across fixtures.
+### M2 — Core TUI (unified) ✅
+- [x] Layout: header / file list (flat) / unified viewer / keybar.
+- [x] Hybrid navigation (Tab focus; n/p file; ]/[ hunk; j/k/g/G/Ctrl-d/u).
+- [x] Scroll + selection + sticky file header (with effective-scroll clamp).
+- [x] Snapshot tests for unified rendering across fixtures (modify, multi-file, nav, scroll, empty).
 - Deliverable: a usable unified diff viewer driven entirely by keyboard.
 
 ### M3 — Delta-style rendering
@@ -108,6 +108,8 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ### M4 — Tree + side-by-side
 - [ ] Compact folder tree (collapse single-child dirs), expand/collapse, markers.
+- [ ] Tree viewport follows the selection (the M2 flat list doesn't scroll-follow;
+      selected file can go off-screen for large changesets — fix here).
 - [ ] `s` side-by-side viewer with line wrapping + alignment.
 - [ ] Snapshot tests for tree + split view.
 
