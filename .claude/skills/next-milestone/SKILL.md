@@ -33,10 +33,14 @@ Drives gdiff development one milestone at a time, autonomously, following the re
 
 6. **Update PLAN.md.** Tick the milestone's sub-task boxes and the top-level milestone box.
 
-7. **Commit to main** (one commit per milestone; conventional message). Include the PLAN.md
+7. **Run `/code-review`** on the pending diff and address its findings (fix real issues, or
+   consciously decline with a reason). Mandatory before every commit — no exceptions for
+   "small" or "docs-only" changes.
+
+8. **Commit to main** (one commit per milestone; conventional message). Include the PLAN.md
    update in the same commit. End the message with the Co-Authored-By trailer.
 
-8. **Report** what you built, what tests cover it, and what the next milestone is. Stop there
+9. **Report** what you built, what tests cover it, and what the next milestone is. Stop there
    unless told to continue.
 
 ## Guardrails

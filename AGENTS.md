@@ -41,7 +41,7 @@ where simpler) and `gh` (PR mode). Both are expected on PATH.
 ```bash
 cargo build                 # debug build
 cargo run                   # launch the TUI (needs a real terminal — see "Running")
-cargo run --example render  # render a fixture frame to stdout as text (agent-friendly!)
+cargo run --example render  # render a frame to stdout as text (agent-friendly!)
 cargo test                  # unit + snapshot/integration tests
 cargo insta test            # run snapshot tests (if cargo-insta installed)
 cargo insta review          # review pending snapshots interactively
@@ -56,8 +56,8 @@ cargo clippy --all-targets -- -D warnings   # lint; warnings are errors
 To verify behavior, do one of:
 - **Snapshot test** (preferred): construct `App`, feed synthetic key events, render to
   `TestBackend`, assert with `insta`. Deterministic, no terminal needed.
-- **`cargo run --example render`**: prints a chosen scenario's frame to stdout so you can
-  read the UI as text.
+- **`cargo run --example render`**: prints a frame to stdout so you can read the UI as
+  text. (M0 renders an empty `App`; fixture-backed scenarios are added as the UI grows.)
 - The `/verify-tui` skill wraps these. Do not block on a live `cargo run`.
 
 ## Testing strategy (see docs/testing.md for detail)
@@ -79,10 +79,17 @@ cargo test
 ```
 All green. Snapshots updated on purpose. The relevant `PLAN.md` checkboxes ticked.
 
+**Then run `/code-review` and address its findings before committing.** This is
+mandatory for every commit — review the pending diff, fix real issues (or consciously
+decline with a reason), and only then commit. Don't skip it because "it's just docs" or
+"a small change". (`/code-review` is a *local* pre-commit gate run by the agent; CI only
+runs fmt/clippy/test and cannot run it.)
+
 ## Workflow (git)
 
 - **Commit directly to `main`, one commit per milestone** (or per coherent sub-task).
   No PRs for gdiff's own development (see ADR 0005).
+- **Run `/code-review` before every commit** and act on its findings (see "Definition of done").
 - Conventional commits: `feat(ui): …`, `fix(diff): …`, `test:`, `docs:`, `chore:`, `refactor:`.
 - Update `PLAN.md` (tick boxes) in the same commit as the work it tracks.
 - Commit messages end with the Co-Authored-By trailer per the harness instructions.

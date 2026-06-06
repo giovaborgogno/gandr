@@ -51,9 +51,10 @@ cargo insta review         # inspect each change; accept intended ones
   `--accept`. Intended changes get committed as updated `.snap` files.
 
 ## `cargo run --example render`
-A non-interactive binary that builds a fixture + `App`, renders one frame, and prints it as
-text to stdout. Use it for a quick eyeball when iterating; it does not need a terminal. Add
-scenarios as the UI grows (`--example render -- <scenario>`).
+A non-interactive binary that builds an `App`, renders one frame, and prints it as text to
+stdout. Use it for a quick eyeball when iterating; it does not need a terminal. As of M0 it
+renders an empty `App`; add fixture-backed scenarios (`--example render -- <scenario>`) as
+the UI grows.
 
 ## What good coverage looks like per milestone
 - M1: engine produces correct hunks/segments for add / delete / modify / rename / binary.

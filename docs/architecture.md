@@ -27,7 +27,9 @@ Layered, one-directional dependencies. Upper layers depend on lower; nothing dep
 ## The `GitBackend` trait
 
 The single seam over version control. Everything above `git/` knows only this trait and its
-DTOs — never `git2::*`. This is what lets us swap to `gix` later (ADR 0001).
+DTOs — never `git2::*`. This is what lets us swap to `gix` later (ADR 0001). The rule is
+**test-enforced**: `tests/architecture.rs` fails if any code outside `src/git/` references
+`git2`.
 
 ```rust
 pub trait GitBackend {
