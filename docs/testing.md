@@ -61,6 +61,25 @@ the UI grows.
 - M2+: a snapshot per view mode × a couple of representative fixtures (small modify, new
   file, deletion, multi-hunk). Navigation tests assert selection/scroll state.
 
+## Visual screenshots (real colors)
+
+Text snapshots and `cargo run --example render` show glyphs + layout but not
+colors. For a faithful, colored image of a frame (useful to confirm the
+delta-style backgrounds / word-level / syntax highlighting actually look right):
+
+```bash
+cargo run --example html_render -- /tmp/gdiff.html         # unified
+cargo run --example html_render -- /tmp/gdiff.html split   # side-by-side
+# then render the HTML to PNG headlessly (no extension needed):
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --disable-gpu --force-device-scale-factor=2 \
+  --screenshot=/tmp/gdiff.png --window-size=1120,520 file:///tmp/gdiff.html
+```
+
+`examples/html_render.rs` dumps the rendered `TestBackend` buffer to HTML with
+each cell's real fg/bg (and BOLD/DIM/REVERSED), so the PNG is exactly what the
+TUI draws. An agent can then `Read` the PNG to inspect the UI.
+
 ## Not in v1
 Real-PTY tests (`portable-pty`/`expectrl`) — heavier and flakier than TestBackend-driven
 tests, and rarely worth it. Listed in `PLAN.md` backlog if we ever need true terminal e2e.
