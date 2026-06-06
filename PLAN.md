@@ -155,7 +155,12 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       wraps), recomputing the diff async to reveal more lines around every hunk
       (`git diff -U<n>`-style). Header shows `⊕N ctx` while expanded. (A per-gap
       "⋯ expand here ⋯" affordance remains a future refinement — see backlog.)
-- [ ] M12 — Multi-line syntax highlighting (carry syntect state across a file).
+- [x] M12 — Multi-line syntax highlighting (carry syntect state across a file).
+      The Files-tab content viewer highlights the whole file with one
+      `HighlightLines` (block comments / multi-line strings render correctly),
+      computed once at load (cached in `Loaded.highlights`), re-run on theme
+      change. The diff viewer still highlights per-line — correct old/new
+      multi-line there needs full file text threaded in (see backlog).
 - [ ] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
       NOT tokio — git2/FS/grep are blocking libs, so a thread pool + an
       epoch token for superseding stale work is the right model). Unified event
@@ -178,8 +183,11 @@ Each milestone is independently runnable and ends in a commit. After each, run t
   repo-wide and jumps to file+line). A possible follow-up: debounce keystrokes so a
   broad query on a huge repo doesn't spawn a walk per character (the epoch already
   drops stale results, so it's a CPU optimization, not a correctness issue).
-- **Multi-line syntax highlighting** — highlighting is per-line, so block comments /
-  multi-line strings aren't tracked; carry syntect state across a file's lines.
+- **Multi-line highlighting in the *diff* viewer** — M12 did the Files-tab
+  whole-file viewer. The diff viewer still highlights each line in isolation;
+  doing it correctly there means highlighting the new file and the old file each
+  in order (carrying state) and mapping spans to displayed lines by line number —
+  needs the full old/new text available to the UI + caching (it isn't today).
 - **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.

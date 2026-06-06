@@ -256,6 +256,8 @@ impl App {
     }
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         self.theme_mode = mode;
+        // Keep the Files-tab content highlighting (computed at load) in sync.
+        self.browser.set_mode(mode);
     }
     pub fn tab(&self) -> Tab {
         self.tab

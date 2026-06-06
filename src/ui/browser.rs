@@ -3,7 +3,7 @@
 
 use crate::app::{App, Focus};
 use crate::browser::EntryKind;
-use crate::highlight::{FgSpan, Highlighter};
+use crate::highlight::FgSpan;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -114,7 +114,6 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
         .content_scroll()
         .min(total.saturating_sub(height));
     let gutter_w = total.to_string().len().max(2);
-    let hl = Highlighter::for_path(&loaded.path, app.theme_mode());
 
     let mut lines: Vec<Line> = Vec::new();
     for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
@@ -122,7 +121,10 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             format!("{:>gutter_w$} ", idx + 1),
             Style::default().fg(Color::DarkGray),
         )];
-        spans.extend(syntax_spans(text, &hl.fg_spans(text)));
+        // Per-line spans precomputed with carried state (multi-line aware, M12).
+        let empty = Vec::new();
+        let fg = loaded.highlights.get(idx).unwrap_or(&empty);
+        spans.extend(syntax_spans(text, fg));
         lines.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(lines), content);

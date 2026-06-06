@@ -41,3 +41,38 @@ fn expanding_a_dir_reveals_children() {
     assert!(matches!(rows[0].kind, EntryKind::Dir { expanded: true }));
     assert_eq!(rows[1].name, "lib.rs");
 }
+
+#[test]
+fn content_highlighting_is_multiline_aware() {
+    // A single .rs file with a block comment spanning several lines (M12).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("a.rs"),
+        "/* open comment\ninterior text line\nclose */\nlet code = 1;\n",
+    )
+    .unwrap();
+
+    let mut browser = Browser::new(root.to_path_buf());
+    // Cursor starts on the only file, which loads automatically.
+    let loaded = browser.loaded().expect("file loaded");
+    assert_eq!(loaded.path.file_name().unwrap(), "a.rs");
+    // One highlight entry per line, computed with carried state.
+    assert_eq!(loaded.highlights.len(), loaded.lines.len());
+
+    // The interior comment line carries the opener's comment color — only
+    // possible because state is carried across lines (stateless per-line
+    // highlighting would treat it as plain code).
+    let opener = loaded.highlights[0].first().map(|s| s.color);
+    let interior = loaded.highlights[1].first().map(|s| s.color);
+    assert!(opener.is_some());
+    assert_eq!(
+        interior, opener,
+        "interior of block comment should be comment-colored"
+    );
+
+    // Re-highlighting under a different theme keeps the per-line structure.
+    browser.set_mode(gdiff::highlight::ThemeMode::Light);
+    let loaded = browser.loaded().unwrap();
+    assert_eq!(loaded.highlights.len(), loaded.lines.len());
+}

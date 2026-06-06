@@ -2,6 +2,7 @@
 //! git-ignored files/folders — only `.git/` is skipped), plus the content of the
 //! selected file. State lives here; rendering is in `ui::browser`.
 
+use crate::highlight::{FgSpan, Highlighter, ThemeMode};
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,6 +30,10 @@ pub struct BrowserRow {
 pub struct Loaded {
     pub path: PathBuf,
     pub lines: Vec<String>,
+    /// Syntax highlight spans per line, computed with carried state across the
+    /// whole file (M12) so multi-line constructs render correctly. One entry per
+    /// line in `lines` (empty for binary/too-large files).
+    pub highlights: Vec<Vec<FgSpan>>,
     pub binary: bool,
     pub too_large: bool,
 }
@@ -46,6 +51,8 @@ pub struct Browser {
     /// every frame — avoids walking disk on every render/keystroke).
     rows_cache: RefCell<Vec<BrowserRow>>,
     rows_dirty: Cell<bool>,
+    /// Theme mode for syntax highlighting (resolved by the app at startup).
+    mode: ThemeMode,
 }
 
 /// List a directory's children: directories first then files, alphabetical,
@@ -81,9 +88,32 @@ impl Browser {
             loaded: None,
             rows_cache: RefCell::new(Vec::new()),
             rows_dirty: Cell::new(true),
+            mode: ThemeMode::Dark,
         };
         browser.load_selection();
         browser
+    }
+
+    /// Set the theme mode and re-highlight the currently loaded file (the app
+    /// resolves the real mode after the browser is constructed).
+    pub fn set_mode(&mut self, mode: ThemeMode) {
+        if self.mode == mode {
+            return;
+        }
+        self.mode = mode;
+        if let Some(loaded) = self.loaded.take() {
+            self.loaded = Some(self.rehighlight(loaded));
+        }
+    }
+
+    /// Recompute a loaded file's highlight spans for the current mode.
+    fn rehighlight(&self, mut loaded: Loaded) -> Loaded {
+        loaded.highlights = if loaded.binary || loaded.too_large {
+            Vec::new()
+        } else {
+            Highlighter::for_path(&loaded.path, self.mode).highlight_file(&loaded.lines)
+        };
+        loaded
     }
 
     /// Visible rows (cached; rebuilt from disk only when the expanded set changed).
@@ -282,13 +312,14 @@ impl Browser {
             self.loaded = Some(Loaded {
                 path: row.path,
                 lines: Vec::new(),
+                highlights: Vec::new(),
                 binary: false,
                 too_large: true,
             });
             return;
         }
 
-        self.loaded = Some(match std::fs::read(&row.path) {
+        let loaded = match std::fs::read(&row.path) {
             Ok(bytes) => {
                 let binary = bytes.contains(&0) || std::str::from_utf8(&bytes).is_err();
                 let lines = if binary {
@@ -302,6 +333,7 @@ impl Browser {
                 Loaded {
                     path: row.path,
                     lines,
+                    highlights: Vec::new(),
                     binary,
                     too_large: false,
                 }
@@ -309,9 +341,13 @@ impl Browser {
             Err(_) => Loaded {
                 path: row.path,
                 lines: Vec::new(),
+                highlights: Vec::new(),
                 binary: false,
                 too_large: false,
             },
-        });
+        };
+        // Highlight the whole file once now (carrying state across lines), so the
+        // renderer just indexes per-line spans instead of re-highlighting.
+        self.loaded = Some(self.rehighlight(loaded));
     }
 }

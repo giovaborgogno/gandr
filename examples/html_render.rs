@@ -103,6 +103,21 @@ fn main() -> Result<()> {
             app.apply_search_result(epoch, gdiff::search::run(&root, &query, mode));
         }
     }
+    if has("filesview") {
+        // A file with a block comment + multi-line string to show that syntax
+        // state is carried across lines (M12).
+        fx.write(
+            "src/demo.rs",
+            "/*\n * A multi-line block comment.\n * None of these lines contain comment markers,\n * yet all render as a comment.\n */\nfn main() {\n    let s = \"a string that\n        spans two lines\";\n    println!(\"{s}\");\n}\n",
+        );
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+        app.handle_key(key('2')); // Files tab
+        app.handle_key(enter); // expand src (cursor stays on src)
+        app.handle_key(key('j')); // → app/
+        app.handle_key(key('j')); // → demo.rs (loads it)
+    }
     if has("help") {
         app.handle_key(key('?'));
     }

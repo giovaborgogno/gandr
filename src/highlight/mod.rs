@@ -78,32 +78,91 @@ impl Highlighter {
         Self { syntax, mode }
     }
 
-    /// Foreground spans for one line. Highlighting is per-line (state is not
-    /// carried across lines), so multi-line constructs aren't tracked yet — good
-    /// enough for M3; empty on any highlighter error.
+    /// Foreground spans for one line, highlighted in isolation (no carried
+    /// state). Use for diff lines where the surrounding file isn't available in
+    /// order; multi-line constructs (block comments / strings) aren't tracked.
+    /// Empty on any highlighter error.
     pub fn fg_spans(&self, text: &str) -> Vec<FgSpan> {
         let mut hl = HighlightLines::new(self.syntax, theme(self.mode));
-        let Ok(ranges) = hl.highlight_line(text, syntaxes()) else {
-            return Vec::new();
-        };
-        let mut out = Vec::with_capacity(ranges.len());
-        let mut idx = 0;
-        for (style, piece) in ranges {
-            let start = idx;
-            let end = idx + piece.len();
-            out.push(FgSpan {
-                start,
-                end,
-                color: to_color(style.foreground),
-            });
-            idx = end;
+        match hl.highlight_line(text, syntaxes()) {
+            Ok(ranges) => ranges_to_spans(ranges),
+            Err(_) => Vec::new(),
         }
-        out
     }
+
+    /// Foreground spans for a whole file's `lines`, in order, carrying syntect
+    /// state across lines — so block comments and multi-line strings highlight
+    /// correctly (M12). Returns one span list per input line (empty for a line
+    /// whose highlight errored). This is O(file) work; compute it once when the
+    /// file is loaded, not per frame.
+    pub fn highlight_file(&self, lines: &[String]) -> Vec<Vec<FgSpan>> {
+        let mut hl = HighlightLines::new(self.syntax, theme(self.mode));
+        lines
+            .iter()
+            .map(|line| match hl.highlight_line(line, syntaxes()) {
+                Ok(ranges) => ranges_to_spans(ranges),
+                Err(_) => Vec::new(),
+            })
+            .collect()
+    }
+}
+
+/// Convert syntect's styled pieces into byte-range foreground spans.
+fn ranges_to_spans(ranges: Vec<(syntect::highlighting::Style, &str)>) -> Vec<FgSpan> {
+    let mut out = Vec::with_capacity(ranges.len());
+    let mut idx = 0;
+    for (style, piece) in ranges {
+        let start = idx;
+        let end = idx + piece.len();
+        out.push(FgSpan {
+            start,
+            end,
+            color: to_color(style.foreground),
+        });
+        idx = end;
+    }
+    out
 }
 
 fn to_color(c: syntect::highlighting::Color) -> Color {
     Color::Rgb(c.r, c.g, c.b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_file_carries_state_across_lines() {
+        let hl = Highlighter::for_path(Path::new("x.rs"), ThemeMode::Dark);
+        // A block comment spanning three lines, then real code.
+        let lines: Vec<String> = ["/* open", "interior text", "close */", "let code = 1;"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let multi = hl.highlight_file(&lines);
+
+        let interior = multi[1].first().expect("interior line has a span").color;
+        let opener = multi[0].first().expect("opener line has a span").color;
+        // Inside the block comment the interior line takes the comment color —
+        // the same as the opener — proving parser state carried across lines.
+        assert_eq!(
+            interior, opener,
+            "interior comment line should be comment-colored"
+        );
+
+        // Highlighted in isolation (per-line), the same text is NOT a comment, so
+        // its color differs — this is exactly what M12 fixes.
+        let standalone = hl.fg_spans("interior text");
+        assert_ne!(
+            standalone.first().map(|s| s.color),
+            Some(interior),
+            "per-line highlighting must differ from stateful (multi-line) highlighting"
+        );
+
+        // The code line after the comment closes is highlighted as code again.
+        assert_eq!(multi.len(), lines.len());
+    }
 }
 
 /// Diff background palette. Fixed dark for M3; light/dark auto-detection (theme
