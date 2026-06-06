@@ -8,7 +8,7 @@
 
 ## Status
 
-- [ ] M0 — Scaffold + skeleton
+- [x] M0 — Scaffold + skeleton
 - [ ] M1 — Git + diff model (no TUI)
 - [ ] M2 — Core TUI (unified)
 - [ ] M3 — Delta-style rendering
@@ -76,12 +76,12 @@ struct Segment    { start: usize, end: usize, changed: bool }   // byte range in
 Each milestone is independently runnable and ends in a commit. After each, run the
 **Definition of done** gate.
 
-### M0 — Scaffold + skeleton
-- [ ] Module tree from "Architecture" exists (empty/stub modules compile).
-- [ ] `App::run` opens an alt-screen ratatui frame and quits on `q`.
-- [ ] First snapshot test infra wired (`TestBackend` + `insta`) — one trivial passing snapshot.
-- [ ] `examples/render.rs` stub: renders a frame to stdout (the agent's "eyes").
-- [ ] CI green.
+### M0 — Scaffold + skeleton ✅
+- [x] Module tree from "Architecture" exists (empty/stub modules compile).
+- [x] `App::run` opens an alt-screen ratatui frame and quits on `q`.
+- [x] First snapshot test infra wired (`TestBackend` + `insta`) — one trivial passing snapshot.
+- [x] `examples/render.rs` stub: renders a frame to stdout (the agent's "eyes").
+- [x] CI green (gate: fmt + clippy -D warnings + test).
 - Deliverable: runs, shows an empty frame, quits cleanly.
 
 ### M1 — Git + diff model (no TUI)
