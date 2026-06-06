@@ -141,6 +141,13 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ## Backlog / later (not v1)
 
+- **Branch/ref picker** — interactively pick *and search* any branch / tag / commit
+  to compare against (the compare picker currently offers only Uncommitted, Staged,
+  the auto-detected base, and the PR). A fuzzy list of refs would close this.
+- **Search across all files** — `/` currently searches only the current file's diff;
+  a project-wide search that jumps to file+match would help on big changesets.
+- **Multi-line syntax highlighting** — highlighting is per-line, so block comments /
+  multi-line strings aren't tracked; carry syntect state across a file's lines.
 - **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.

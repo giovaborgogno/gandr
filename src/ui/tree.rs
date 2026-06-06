@@ -135,12 +135,20 @@ fn marker_color(files: &[FileDiff], index: usize) -> Color {
 }
 
 /// Review marker span (✓ reviewed, ⚠ changed-since, blank otherwise).
-fn review_span(status: ReviewStatus, row_style: Style) -> Span<'static> {
-    match status {
-        ReviewStatus::Reviewed => Span::styled("✓ ", row_style.fg(Color::Green)),
-        ReviewStatus::ChangedSinceReviewed => Span::styled("⚠ ", row_style.fg(Color::Yellow)),
-        ReviewStatus::Unreviewed => Span::styled("  ", row_style),
-    }
+/// On the selected row we drop the fg color so the reversed highlight stays
+/// uniform (a colored fg would invert into a colored background block).
+fn review_span(status: ReviewStatus, row_style: Style, selected: bool) -> Span<'static> {
+    let glyph = match status {
+        ReviewStatus::Reviewed => "✓ ",
+        ReviewStatus::ChangedSinceReviewed => "⚠ ",
+        ReviewStatus::Unreviewed => "  ",
+    };
+    let style = match (status, selected) {
+        (_, true) | (ReviewStatus::Unreviewed, _) => row_style,
+        (ReviewStatus::Reviewed, _) => row_style.fg(Color::Green),
+        (ReviewStatus::ChangedSinceReviewed, _) => row_style.fg(Color::Yellow),
+    };
+    Span::styled(glyph, style)
 }
 
 /// Render the file tree into `area`. `cursor` is the selected visible-row index;
@@ -171,12 +179,19 @@ pub fn render(
             Style::default()
         };
 
+        // On the selected row, fg colors are dropped so the reversed highlight
+        // stays uniform (a colored fg inverts into a colored background block).
         let mut spans = match &row.kind {
             RowKind::Dir { expanded, .. } => {
                 let arrow = if *expanded { '▾' } else { '▸' };
+                let style = if selected {
+                    row_style
+                } else {
+                    row_style.fg(Color::Blue)
+                };
                 vec![Span::styled(
                     format!("{indent}{arrow} {}/", row.label),
-                    row_style.fg(Color::Blue),
+                    style,
                 )]
             }
             RowKind::File { index } => {
@@ -184,13 +199,15 @@ pub fn render(
                     .get(*index)
                     .copied()
                     .unwrap_or(ReviewStatus::Unreviewed);
+                let marker_style = if selected {
+                    row_style
+                } else {
+                    row_style.fg(marker_color(files, *index))
+                };
                 vec![
                     Span::styled(indent, row_style),
-                    review_span(status, row_style),
-                    Span::styled(
-                        format!("{} ", status_marker(files, *index)),
-                        row_style.fg(marker_color(files, *index)),
-                    ),
+                    review_span(status, row_style, selected),
+                    Span::styled(format!("{} ", status_marker(files, *index)), marker_style),
                     Span::styled(row.label.clone(), row_style),
                 ]
             }
