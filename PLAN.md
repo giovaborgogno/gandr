@@ -192,10 +192,12 @@ Each milestone is independently runnable and ends in a commit. After each, run t
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.
 - **Copy** (`y`) path/selection to clipboard (needs `arboard` or OSC 52).
-- **Per-gap context expand** — M11 expands context globally (cycles `-U<n>`). A
-  finer "⋯ expand here ⋯" affordance on each fold gap (reveal lines for one hunk
-  only, both directions) would match the DESIGN sketch; needs full-file content
-  and gap rows in the viewer model.
+- ~~**Per-gap context expand**~~ — done. The diff viewer now folds the file's
+  full line list for display: collapsed gaps render as `⋯ N unchanged lines ⋯`
+  markers, and `Enter` (diff focused) expands the gap nearest the viewport top.
+  `o` still sets the global base context (it now just re-folds — no diff rebuild).
+  A possible refinement: incremental reveal (expand a few lines at a time, both
+  directions) instead of revealing the whole gap.
 - **Mouse** (scroll + click-to-select-file) — enable crossterm mouse capture + hit-testing.
 - **Tree-filter search** — `/` currently searches the diff; filtering the file tree by
   query (contextual on tree focus) is unbuilt.

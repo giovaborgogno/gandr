@@ -5,7 +5,8 @@
 //! delta-style diff background, and word-level emphasis. Renders the window
 //! `[scroll, scroll+height)` with the background filled to the panel edge.
 
-use crate::diff::{FileDiff, Line as DiffLine, LineKind};
+use crate::diff::fold::DiffRow;
+use crate::diff::{Line as DiffLine, LineKind};
 use crate::highlight::{compose, FgSpan, Palette};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -14,16 +15,31 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 /// Compute the gutter width (digits) from the largest line number in the file.
-fn gutter_width(file: &FileDiff) -> usize {
-    file.hunks
-        .iter()
-        .flat_map(|h| h.lines.iter())
+pub(crate) fn gutter_width(full: &[DiffLine]) -> usize {
+    full.iter()
         .filter_map(|l| l.old_no.max(l.new_no))
         .max()
         .unwrap_or(1)
         .to_string()
         .len()
         .max(2)
+}
+
+/// The "⋯ N unchanged lines ⋯" marker shown for a collapsed fold; pressing Enter
+/// (with the diff focused) expands the one nearest the top of the viewport.
+pub(crate) fn fold_marker(hidden: usize, width: usize) -> Line<'static> {
+    let label = format!(" ⋯ {hidden} unchanged lines (Enter to expand) ⋯");
+    let mut text = label.chars().take(width).collect::<String>();
+    let used = text.chars().count();
+    if used < width {
+        text.push_str(&" ".repeat(width - used));
+    }
+    Line::from(Span::styled(
+        text,
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    ))
 }
 
 fn num_cell(no: Option<u32>, width: usize) -> String {
@@ -48,11 +64,58 @@ pub(crate) fn line_fg<'a>(
     spans.map(Vec::as_slice).unwrap_or(&[])
 }
 
-/// Build every row of the file's diff as a styled [`Line`], filling backgrounds
-/// to `width` columns.
+/// Build a styled [`Line`] for one diff line, filling the background to `width`.
+fn line_row(
+    line: &DiffLine,
+    w: usize,
+    width: usize,
+    fg: &[FgSpan],
+    palette: &Palette,
+    word_on: bool,
+    query: Option<&str>,
+) -> Line<'static> {
+    let (bar, bar_color, base_bg) = match line.kind {
+        LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
+        LineKind::Del => ('▌', Color::Red, Some(palette.del_bg)),
+        LineKind::Context => (' ', Color::DarkGray, None),
+    };
+
+    let gutter = format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w));
+    let mut spans = vec![
+        Span::styled(gutter, Style::default().fg(Color::DarkGray)),
+        Span::styled(bar.to_string(), Style::default().fg(bar_color)),
+        Span::raw(" "),
+    ];
+
+    let text_spans = compose::line_spans(
+        &line.text,
+        line.kind,
+        &line.segments,
+        fg,
+        palette,
+        word_on,
+        query,
+    );
+    spans.extend(text_spans);
+
+    // Fill the rest of the row with the base background, delta-style.
+    if let Some(bg) = base_bg {
+        let used = w * 2 + 3 + line.text.chars().count(); // gutter + bar + space + text
+        if used < width {
+            spans.push(Span::styled(
+                " ".repeat(width - used),
+                Style::default().bg(bg),
+            ));
+        }
+    }
+    Line::from(spans)
+}
+
+/// Build every display row of the file's folded diff as a styled [`Line`].
 #[allow(clippy::too_many_arguments)]
 pub fn rows(
-    file: &FileDiff,
+    full: &[DiffLine],
+    display: &[DiffRow],
     width: usize,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
@@ -60,54 +123,18 @@ pub fn rows(
     word_on: bool,
     query: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let w = gutter_width(file);
-    let mut out: Vec<Line<'static>> = Vec::new();
-
-    for hunk in &file.hunks {
-        out.push(Line::from(Span::styled(
-            hunk.header.clone(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-        )));
-
-        for line in &hunk.lines {
-            let (bar, bar_color, base_bg) = match line.kind {
-                LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
-                LineKind::Del => ('▌', Color::Red, Some(palette.del_bg)),
-                LineKind::Context => (' ', Color::DarkGray, None),
-            };
-
-            let gutter = format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w));
-            let mut spans = vec![
-                Span::styled(gutter, Style::default().fg(Color::DarkGray)),
-                Span::styled(bar.to_string(), Style::default().fg(bar_color)),
-                Span::raw(" "),
-            ];
-
-            let fg = line_fg(line, old_hl, new_hl);
-            let text_spans = compose::line_spans(
-                &line.text,
-                line.kind,
-                &line.segments,
-                fg,
-                palette,
-                word_on,
-                query,
-            );
-            spans.extend(text_spans);
-
-            // Fill the rest of the row with the base background, delta-style.
-            if let Some(bg) = base_bg {
-                let used = w * 2 + 3 + line.text.chars().count(); // gutter + bar + space + text
-                if used < width {
-                    let pad = " ".repeat(width - used);
-                    spans.push(Span::styled(pad, Style::default().bg(bg)));
-                }
+    let w = gutter_width(full);
+    display
+        .iter()
+        .map(|row| match row {
+            DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width),
+            DiffRow::Line(idx) => {
+                let line = &full[*idx];
+                let fg = line_fg(line, old_hl, new_hl);
+                line_row(line, w, width, fg, palette, word_on, query)
             }
-
-            out.push(Line::from(spans));
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// Render the unified diff for `file` into `area`, scrolled to `scroll` rows.
@@ -118,7 +145,8 @@ pub fn rows(
 pub fn render(
     f: &mut Frame,
     area: Rect,
-    file: &FileDiff,
+    full: &[DiffLine],
+    display: &[DiffRow],
     scroll: usize,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
@@ -132,7 +160,8 @@ pub fn render(
         ..area
     };
     let all = rows(
-        file,
+        full,
+        display,
         content.width as usize,
         old_hl,
         new_hl,

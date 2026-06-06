@@ -4,27 +4,15 @@
 //! column, and a logical row expands to the taller of its two wrapped cells so
 //! the two sides stay aligned (the user-chosen behavior over truncation).
 
-use crate::diff::{FileDiff, Hunk, Line as DiffLine, LineKind};
+use crate::diff::fold::DiffRow;
+use crate::diff::{Line as DiffLine, LineKind};
 use crate::highlight::{compose, FgSpan, Palette};
-use crate::ui::viewer_unified::line_fg;
+use crate::ui::viewer_unified::{fold_marker, gutter_width, line_fg};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-
-/// Gutter (line-number) width for a side.
-fn gutter_width(file: &FileDiff) -> usize {
-    file.hunks
-        .iter()
-        .flat_map(|h| h.lines.iter())
-        .filter_map(|l| l.old_no.max(l.new_no))
-        .max()
-        .unwrap_or(1)
-        .to_string()
-        .len()
-        .max(2)
-}
 
 fn num_cell(no: Option<u32>, width: usize) -> String {
     match no {
@@ -142,15 +130,14 @@ fn cell_rows(
     rows
 }
 
-/// Pair a hunk's lines into (old, new) logical rows for the two columns.
-fn pair_rows(hunk: &Hunk) -> Vec<(Option<&DiffLine>, Option<&DiffLine>)> {
+/// Pair a visible region's lines into (old, new) logical rows for the two columns.
+fn pair_rows<'a>(lines: &[&'a DiffLine]) -> Vec<(Option<&'a DiffLine>, Option<&'a DiffLine>)> {
     let mut pairs = Vec::new();
-    let lines = &hunk.lines;
     let mut i = 0;
     while i < lines.len() {
         match lines[i].kind {
             LineKind::Context => {
-                pairs.push((Some(&lines[i]), Some(&lines[i])));
+                pairs.push((Some(lines[i]), Some(lines[i])));
                 i += 1;
             }
             LineKind::Del | LineKind::Add => {
@@ -165,7 +152,7 @@ fn pair_rows(hunk: &Hunk) -> Vec<(Option<&DiffLine>, Option<&DiffLine>)> {
                 }
                 let adds = &lines[adds_start..i];
                 for k in 0..dels.len().max(adds.len()) {
-                    pairs.push((dels.get(k), adds.get(k)));
+                    pairs.push((dels.get(k).copied(), adds.get(k).copied()));
                 }
             }
         }
@@ -173,10 +160,11 @@ fn pair_rows(hunk: &Hunk) -> Vec<(Option<&DiffLine>, Option<&DiffLine>)> {
     pairs
 }
 
-/// Build every terminal row of the side-by-side view.
+/// Build every terminal row of the side-by-side view from the folded display rows.
 #[allow(clippy::too_many_arguments)]
 pub fn rows(
-    file: &FileDiff,
+    full: &[DiffLine],
+    display: &[DiffRow],
     width: usize,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
@@ -184,38 +172,55 @@ pub fn rows(
     word_on: bool,
     query: Option<&str>,
 ) -> Vec<Line<'static>> {
-    let gutter_w = gutter_width(file);
+    let gutter_w = gutter_width(full);
     let side_w = width.saturating_sub(1) / 2;
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    for hunk in &file.hunks {
-        out.push(Line::from(Span::styled(
-            hunk.header.clone(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-        )));
+    let mut i = 0;
+    while i < display.len() {
+        match &display[i] {
+            DiffRow::Fold { hidden, .. } => {
+                out.push(fold_marker(*hidden, width));
+                i += 1;
+            }
+            DiffRow::Line(_) => {
+                // Gather the contiguous run of line rows in this visible region.
+                let start = i;
+                while i < display.len() && matches!(display[i], DiffRow::Line(_)) {
+                    i += 1;
+                }
+                let region: Vec<&DiffLine> = display[start..i]
+                    .iter()
+                    .filter_map(|r| match r {
+                        DiffRow::Line(idx) => Some(&full[*idx]),
+                        DiffRow::Fold { .. } => None,
+                    })
+                    .collect();
 
-        for (left, right) in pair_rows(hunk) {
-            let left_rows = cell_rows(
-                left, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
-            );
-            let right_rows = cell_rows(
-                right, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
-            );
-            let height = left_rows.len().max(right_rows.len());
+                for (left, right) in pair_rows(&region) {
+                    let left_rows = cell_rows(
+                        left, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+                    );
+                    let right_rows = cell_rows(
+                        right, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+                    );
+                    let height = left_rows.len().max(right_rows.len());
 
-            for k in 0..height {
-                let mut spans = left_rows
-                    .get(k)
-                    .cloned()
-                    .unwrap_or_else(|| vec![Span::raw(" ".repeat(side_w))]);
-                spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
-                spans.extend(
-                    right_rows
-                        .get(k)
-                        .cloned()
-                        .unwrap_or_else(|| vec![Span::raw(" ".repeat(side_w))]),
-                );
-                out.push(Line::from(spans));
+                    for k in 0..height {
+                        let mut spans = left_rows
+                            .get(k)
+                            .cloned()
+                            .unwrap_or_else(|| vec![Span::raw(" ".repeat(side_w))]);
+                        spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+                        spans.extend(
+                            right_rows
+                                .get(k)
+                                .cloned()
+                                .unwrap_or_else(|| vec![Span::raw(" ".repeat(side_w))]),
+                        );
+                        out.push(Line::from(spans));
+                    }
+                }
             }
         }
     }
@@ -227,7 +232,8 @@ pub fn rows(
 pub fn render(
     f: &mut Frame,
     area: Rect,
-    file: &FileDiff,
+    full: &[DiffLine],
+    display: &[DiffRow],
     scroll: usize,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
@@ -241,7 +247,8 @@ pub fn render(
         ..area
     };
     let all = rows(
-        file,
+        full,
+        display,
         content.width as usize,
         old_hl,
         new_hl,

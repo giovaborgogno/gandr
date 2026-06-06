@@ -392,7 +392,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("] / [", "next / previous hunk"),
         (
             "Enter, → / ←",
-            "expand / collapse tree; Enter on a file focuses diff",
+            "expand/collapse tree; Enter on a file → diff; Enter in diff expands a fold",
         ),
         ("g / G, Ctrl-d/u", "top / bottom; half-page"),
         ("s", "toggle unified / side-by-side"),
@@ -526,6 +526,9 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     // whole file (M12) and cached — so block comments / multi-line strings are
     // correct in the diff, not just the Files tab.
     let (old_hl, new_hl) = app.diff_highlight();
+    // Folded display rows (per-gap expand) over the file's full line list.
+    let full = app.full_lines();
+    let display = app.display_rows();
     // Highlight search matches in the diff while a (non-empty) query is active.
     let query = app
         .search()
@@ -535,7 +538,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
         ViewMode::Unified => viewer_unified::render(
             f,
             diff_body,
-            file,
+            &full,
+            &display,
             app.scroll(),
             &old_hl,
             &new_hl,
@@ -546,7 +550,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
         ViewMode::SideBySide => viewer_split::render(
             f,
             diff_body,
-            file,
+            &full,
+            &display,
             app.scroll(),
             &old_hl,
             &new_hl,

@@ -6,6 +6,7 @@
 use crate::git::FileChange;
 
 pub mod engine;
+pub mod fold;
 pub mod word;
 
 /// Whether a line was added, removed, or is unchanged context.

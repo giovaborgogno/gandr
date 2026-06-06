@@ -5,7 +5,8 @@ pub mod watcher;
 
 use crate::browser::Browser;
 use crate::config::{Config, ViewMode};
-use crate::diff::{engine, FileDiff};
+use crate::diff::fold::{self, DiffRow};
+use crate::diff::{engine, FileDiff, Line as DiffLine};
 use crate::fuzzy;
 use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext};
 use crate::highlight::{FgSpan, Highlighter, ThemeMode};
@@ -104,6 +105,17 @@ pub struct App {
     /// sides (M12), keyed by (path, theme). Recomputed lazily on render when the
     /// selection or theme changes — never per frame.
     diff_hl: RefCell<DiffHighlight>,
+    /// Full annotated line list of the selected file (no folding), cached by
+    /// path. Feeds the folded display rows and per-gap expand.
+    full_cache: RefCell<(Option<PathBuf>, Rc<Vec<DiffLine>>)>,
+    /// Cached folded display rows, keyed by (path, base context, expand version).
+    display_cache: RefCell<DisplayRows>,
+    /// Which folds (by full-line anchor) the user expanded, for the file at
+    /// `expanded_path`. Reset when the selected file or its content changes.
+    expanded_folds: HashSet<usize>,
+    expanded_path: Option<PathBuf>,
+    /// Bumped on each expand so the display cache recomputes.
+    expanded_version: u64,
     /// The compare picker overlay, when open.
     picker: Option<Picker>,
     /// Persisted review state + where it lives.
@@ -168,6 +180,14 @@ struct DiffHighlight {
     new: SideHighlight,
 }
 
+/// Cached folded display rows for the selected file, with the key they were
+/// computed for (path, base context lines, expand version).
+#[derive(Default)]
+struct DisplayRows {
+    key: Option<(PathBuf, usize, u64)>,
+    rows: Rc<Vec<DiffRow>>,
+}
+
 /// In-diff search: the query and the current match's row offset.
 pub struct Search {
     pub query: String,
@@ -213,6 +233,11 @@ impl App {
             tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
             diff_hl: RefCell::new(DiffHighlight::default()),
+            full_cache: RefCell::new((None, Rc::new(Vec::new()))),
+            display_cache: RefCell::new(DisplayRows::default()),
+            expanded_folds: HashSet::new(),
+            expanded_path: None,
+            expanded_version: 0,
             picker: None,
             review,
             review_path,
@@ -389,6 +414,91 @@ impl App {
         (old, new)
     }
 
+    /// The full annotated line list of the selected file (no folding), cached by
+    /// path. Empty when nothing is selected.
+    pub fn full_lines(&self) -> Rc<Vec<DiffLine>> {
+        let path = self.current().map(|f| f.change.path.clone());
+        if self.full_cache.borrow().0 == path {
+            return self.full_cache.borrow().1.clone();
+        }
+        let full = match self.current() {
+            Some(f) => Rc::new(engine::all_lines(&f.old_text, &f.new_text)),
+            None => Rc::new(Vec::new()),
+        };
+        *self.full_cache.borrow_mut() = (path, Rc::clone(&full));
+        full
+    }
+
+    /// The folded display rows for the selected file: changed lines plus base
+    /// context, with longer unchanged runs collapsed to folds (expanded ones
+    /// shown in full). Cached by (path, context, expand version).
+    pub fn display_rows(&self) -> Rc<Vec<DiffRow>> {
+        let path = self.current().map(|f| f.change.path.clone());
+        let context = self.config.context_lines;
+        let key = path.clone().map(|p| (p, context, self.expanded_version));
+        if self.display_cache.borrow().key == key {
+            return self.display_cache.borrow().rows.clone();
+        }
+        let full = self.full_lines();
+        // Only apply expansions that belong to the currently selected file.
+        let empty = HashSet::new();
+        let expanded = if self.expanded_path == path {
+            &self.expanded_folds
+        } else {
+            &empty
+        };
+        let rows = Rc::new(fold::fold(&full, context, expanded));
+        *self.display_cache.borrow_mut() = DisplayRows {
+            key,
+            rows: Rc::clone(&rows),
+        };
+        rows
+    }
+
+    /// Drop the per-file render caches (full lines, folded rows, highlight) and
+    /// fold expansions. Called when the file set changes so a same-path edit
+    /// doesn't reuse stale content.
+    fn invalidate_file_caches(&mut self) {
+        self.diff_hl.get_mut().key = None;
+        self.full_cache.get_mut().0 = None;
+        self.display_cache.get_mut().key = None;
+        self.expanded_folds.clear();
+        self.expanded_path = None;
+        self.expanded_version = self.expanded_version.wrapping_add(1);
+    }
+
+    /// Expand the fold nearest the top of the viewport (the gap the user is
+    /// looking at), revealing its hidden lines. Repeating reveals more gaps.
+    fn expand_active_fold(&mut self) {
+        let rows = self.display_rows();
+        let folds: Vec<(usize, usize)> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| match r {
+                DiffRow::Fold { start, .. } => Some((i, *start)),
+                DiffRow::Line(_) => None,
+            })
+            .collect();
+        if folds.is_empty() {
+            return;
+        }
+        // The fold at or after the current scroll (the gap below the top of the
+        // viewport); if we're past every fold, the nearest one above (the last).
+        let (_, anchor) = folds
+            .iter()
+            .find(|(row, _)| *row >= self.scroll)
+            .copied()
+            .unwrap_or_else(|| folds[folds.len() - 1]);
+
+        let path = self.current().map(|f| f.change.path.clone());
+        if self.expanded_path != path {
+            self.expanded_path = path;
+            self.expanded_folds.clear();
+        }
+        self.expanded_folds.insert(anchor);
+        self.expanded_version = self.expanded_version.wrapping_add(1);
+    }
+
     // ---- file tree ----
 
     /// The current visible tree rows (dirs + files, compacted + collapse-aware).
@@ -413,27 +523,27 @@ impl App {
         s
     }
 
-    // ---- diff-row geometry (kept in sync with viewer_unified row layout) ----
+    // ---- diff-row geometry (over the folded display rows) ----
 
-    /// Row offset of each hunk header within the selected file's viewer.
+    /// Row offsets of each visible region's first line (after each fold, plus the
+    /// top) — the jump targets for `]`/`[`.
     fn hunk_offsets(&self) -> Vec<usize> {
-        let Some(file) = self.current() else {
-            return Vec::new();
-        };
-        let mut offsets = Vec::with_capacity(file.hunks.len());
-        let mut row = 0;
-        for hunk in &file.hunks {
-            offsets.push(row);
-            row += 1 + hunk.lines.len(); // 1 header row + its lines
+        let rows = self.display_rows();
+        let mut offsets = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            if matches!(row, DiffRow::Line(_)) {
+                let region_start = i == 0 || matches!(rows[i - 1], DiffRow::Fold { .. });
+                if region_start {
+                    offsets.push(i);
+                }
+            }
         }
         offsets
     }
 
-    /// Total viewer rows for the selected file.
+    /// Total viewer rows for the selected file (folded display rows).
     fn total_rows(&self) -> usize {
-        self.current()
-            .map(|f| f.hunks.iter().map(|h| 1 + h.lines.len()).sum())
-            .unwrap_or(0)
+        self.display_rows().len()
     }
 
     fn max_scroll(&self) -> usize {
@@ -545,9 +655,11 @@ impl App {
         self.scroll = self.scroll.saturating_sub(n);
     }
 
-    /// Cycle how many context lines surround each hunk (expand, then wrap back
-    /// to the tightest view), recomputing the diff asynchronously. Lets the user
-    /// reveal more of the file around changes — `git diff -U<n>`-style.
+    /// Cycle how many context lines surround each hunk (expand, then wrap back to
+    /// the tightest view). The viewer folds from the full line list, and the
+    /// display-row cache is keyed by context — so this just changes the base
+    /// context; no diff rebuild or git access is needed (it also preserves any
+    /// per-gap expansions). `git diff -U<n>`-style.
     fn cycle_context(&mut self) {
         const LADDER: [usize; 4] = [3, 10, 30, 100];
         let cur = self.config.context_lines;
@@ -556,7 +668,8 @@ impl App {
             .copied()
             .find(|&c| c > cur)
             .unwrap_or(LADDER[0]);
-        self.request_refresh();
+        // Re-clamp scroll in case fewer rows are shown after re-folding.
+        self.scroll = self.scroll.min(self.max_scroll());
     }
 
     fn next_hunk(&mut self) {
@@ -604,10 +717,9 @@ impl App {
         let prev_scroll = self.scroll;
         self.files = files;
         self.error = None;
-        // The file set (and thus old/new text) changed: drop the cached syntax
-        // highlight so a same-path working-tree edit doesn't keep stale colors.
-        // The (path, theme) key wouldn't otherwise notice a content change.
-        self.diff_hl.get_mut().key = None;
+        // The file set (and thus old/new text) changed: drop per-file caches so a
+        // same-path working-tree edit doesn't reuse stale content/colors/folds.
+        self.invalidate_file_caches();
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
         {
@@ -708,27 +820,21 @@ impl App {
         }
     }
 
-    /// Row offsets (in the unified viewer) of lines matching the search query.
+    /// Display-row offsets of lines matching the search query (folds skipped).
     fn search_matches(&self) -> Vec<usize> {
         let query = match &self.search {
             Some(s) if !s.query.is_empty() => s.query.to_lowercase(),
             _ => return Vec::new(),
         };
-        let Some(file) = self.current() else {
-            return Vec::new();
-        };
-        let mut matches = Vec::new();
-        let mut row = 0;
-        for hunk in &file.hunks {
-            row += 1; // header row
-            for line in &hunk.lines {
-                if line.text.to_lowercase().contains(&query) {
-                    matches.push(row);
-                }
-                row += 1;
-            }
-        }
-        matches
+        let rows = self.display_rows();
+        let full = self.full_lines();
+        rows.iter()
+            .enumerate()
+            .filter_map(|(i, row)| match row {
+                DiffRow::Line(idx) if full[*idx].text.to_lowercase().contains(&query) => Some(i),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Jump the viewer to the next/previous search match (wrapping).
@@ -1209,6 +1315,8 @@ impl App {
                     None => {}
                 }
             }
+            // In the diff, Enter expands the fold nearest the top of the viewport.
+            KeyCode::Enter if self.focus == Focus::Diff => self.expand_active_fold(),
             KeyCode::Right if self.focus == Focus::Tree => self.set_dir_collapsed(false),
             KeyCode::Left if self.focus == Focus::Tree => self.set_dir_collapsed(true),
 

@@ -69,6 +69,99 @@ pub fn line_hunks(old: &str, new: &str, context: usize) -> Vec<Hunk> {
         .collect()
 }
 
+/// Emit the removed+added lines for one change, with word-level emphasis on the
+/// pairs (shared by [`build_hunk`] and [`all_lines`]).
+fn emit_change(
+    change: &imara_diff::Hunk,
+    old_lines: &[&str],
+    new_lines: &[&str],
+    out: &mut Vec<Line>,
+) {
+    let (ds, de) = (change.before.start as usize, change.before.end as usize);
+    let (as_, ae) = (change.after.start as usize, change.after.end as usize);
+
+    let mut del_lines: Vec<Line> = old_lines[ds..de]
+        .iter()
+        .enumerate()
+        .map(|(offset, text)| Line {
+            kind: LineKind::Del,
+            old_no: Some((ds + offset) as u32 + 1),
+            new_no: None,
+            text: strip_newline(text).to_string(),
+            segments: Vec::new(),
+        })
+        .collect();
+    let mut add_lines: Vec<Line> = new_lines[as_..ae]
+        .iter()
+        .enumerate()
+        .map(|(offset, text)| Line {
+            kind: LineKind::Add,
+            old_no: None,
+            new_no: Some((as_ + offset) as u32 + 1),
+            text: strip_newline(text).to_string(),
+            segments: Vec::new(),
+        })
+        .collect();
+
+    // Word-level emphasis for removed/added lines paired by position.
+    for (del, add) in del_lines.iter_mut().zip(add_lines.iter_mut()) {
+        let (old_segs, new_segs) = word::segments(&del.text, &add.text);
+        del.segments = old_segs;
+        add.segments = new_segs;
+    }
+
+    out.extend(del_lines);
+    out.extend(add_lines);
+}
+
+/// An unchanged context line (1:1 on both sides) at the given indices.
+fn context_line(old_i: usize, new_i: usize, old_lines: &[&str]) -> Line {
+    Line {
+        kind: LineKind::Context,
+        old_no: Some(old_i as u32 + 1),
+        new_no: Some(new_i as u32 + 1),
+        text: strip_newline(old_lines[old_i]).to_string(),
+        segments: Vec::new(),
+    }
+}
+
+/// Every line of the file, annotated (no context folding): the full sequence of
+/// Context/Del/Add lines with `old_no`/`new_no` and word segments. Folding for
+/// display happens later (see `diff::fold`), so the hidden context can be
+/// revealed on demand. An unchanged file yields all its lines as `Context`
+/// (which the fold step then collapses); only a truly empty file yields `[]`.
+pub fn all_lines(old: &str, new: &str) -> Vec<Line> {
+    let old_lines: Vec<&str> = lines(old).collect();
+    let new_lines: Vec<&str> = lines(new).collect();
+
+    let input = InternedInput::new(old, new);
+    let mut diff = Diff::compute(Algorithm::Histogram, &input);
+    diff.postprocess_lines(&input);
+    let changes: Vec<imara_diff::Hunk> = diff.hunks().collect();
+
+    let mut out: Vec<Line> = Vec::new();
+    let (mut old_i, mut new_i, mut ci) = (0usize, 0usize, 0usize);
+    while old_i < old_lines.len() || ci < changes.len() {
+        if let Some(change) = changes.get(ci) {
+            if old_i == change.before.start as usize {
+                emit_change(change, &old_lines, &new_lines, &mut out);
+                old_i = change.before.end as usize;
+                new_i = change.after.end as usize;
+                ci += 1;
+                continue;
+            }
+        }
+        if old_i < old_lines.len() {
+            out.push(context_line(old_i, new_i, &old_lines));
+            old_i += 1;
+            new_i += 1;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
 /// Build one displayed hunk from a group of adjacent imara change-hunks.
 fn build_hunk(
     group: &[imara_diff::Hunk],
@@ -95,43 +188,9 @@ fn build_hunk(
         // A change begins exactly at the current old position?
         if let Some(change) = group.get(ci) {
             if old_i == change.before.start as usize {
-                let (ds, de) = (change.before.start as usize, change.before.end as usize);
-                let (as_, ae) = (change.after.start as usize, change.after.end as usize);
-
-                let mut del_lines: Vec<Line> = old_lines[ds..de]
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, text)| Line {
-                        kind: LineKind::Del,
-                        old_no: Some((ds + offset) as u32 + 1),
-                        new_no: None,
-                        text: strip_newline(text).to_string(),
-                        segments: Vec::new(),
-                    })
-                    .collect();
-                let mut add_lines: Vec<Line> = new_lines[as_..ae]
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, text)| Line {
-                        kind: LineKind::Add,
-                        old_no: None,
-                        new_no: Some((as_ + offset) as u32 + 1),
-                        text: strip_newline(text).to_string(),
-                        segments: Vec::new(),
-                    })
-                    .collect();
-
-                // Word-level emphasis for removed/added lines paired by position.
-                for (del, add) in del_lines.iter_mut().zip(add_lines.iter_mut()) {
-                    let (old_segs, new_segs) = word::segments(&del.text, &add.text);
-                    del.segments = old_segs;
-                    add.segments = new_segs;
-                }
-
-                out.extend(del_lines);
-                out.extend(add_lines);
-                old_i = de;
-                new_i = ae;
+                emit_change(change, old_lines, new_lines, &mut out);
+                old_i = change.before.end as usize;
+                new_i = change.after.end as usize;
                 ci += 1;
                 continue;
             }
@@ -139,13 +198,7 @@ fn build_hunk(
 
         // Otherwise an unchanged context line (1:1 on both sides).
         if old_i < old_end {
-            out.push(Line {
-                kind: LineKind::Context,
-                old_no: Some(old_i as u32 + 1),
-                new_no: Some(new_i as u32 + 1),
-                text: strip_newline(old_lines[old_i]).to_string(),
-                segments: Vec::new(),
-            });
+            out.push(context_line(old_i, new_i, old_lines));
             old_i += 1;
             new_i += 1;
         } else {

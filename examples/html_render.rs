@@ -131,6 +131,25 @@ fn main() -> Result<()> {
         app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
         app.set_theme_mode(ThemeMode::Dark);
     }
+    if has("fold") {
+        // A long file with one change in the middle → folds above and below.
+        let original: String = (1..=40)
+            .map(|n| format!("fn item_{n}() {{ /* body {n} */ }}\n"))
+            .collect();
+        fx.write("src/big.rs", &original);
+        fx.commit("seed");
+        fx.write(
+            "src/big.rs",
+            &original.replace("fn item_20()", "fn renamed_item_20()"),
+        );
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // focus diff
+        if has("expand") {
+            app.handle_key(enter); // expand the first fold (top)
+        }
+    }
     if has("help") {
         app.handle_key(key('?'));
     }

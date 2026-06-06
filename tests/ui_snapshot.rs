@@ -523,6 +523,51 @@ fn diff_highlight_invalidates_on_same_path_edit() {
     assert_eq!(after.len(), 3);
 }
 
+// ---- Per-gap expand (fold markers + Enter) ----
+
+#[test]
+fn diff_shows_fold_marker_and_enter_expands_it() {
+    let fx = Fixture::new();
+    // 40 unchanged lines with a single change near the middle → a big fold above
+    // and below the change.
+    let original: String = (1..=40).map(|n| format!("line{n}\n")).collect();
+    fx.write("big.txt", &original);
+    fx.commit("init");
+    fx.write("big.txt", &original.replace("line20\n", "LINE20\n"));
+    let mut app = app_from(&fx);
+
+    // Before expanding: the diff has folds (fewer display rows than the 41 lines).
+    let folded = app.display_rows().len();
+    let fulllen = app.full_lines().len();
+    assert!(
+        folded < fulllen,
+        "context should be folded ({folded} rows < {fulllen} lines)"
+    );
+    let fold_count = |a: &App| {
+        a.display_rows()
+            .iter()
+            .filter(|r| matches!(r, gdiff::diff::fold::DiffRow::Fold { .. }))
+            .count()
+    };
+    assert!(fold_count(&app) >= 1, "expected at least one fold marker");
+
+    // Focus the diff and press Enter to expand the fold nearest the top.
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    let before = fold_count(&app);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let after = fold_count(&app);
+    assert!(
+        after < before,
+        "Enter should expand a fold (folds {before} → {after})"
+    );
+    // The rendered frame shows the marker (use a fresh, unexpanded app).
+    let fresh = app_from(&fx);
+    assert!(
+        frame(&fresh, 80, 16).contains("unchanged lines"),
+        "the fold marker should be visible in the diff"
+    );
+}
+
 // ---- M11: expand context ----
 
 #[test]
