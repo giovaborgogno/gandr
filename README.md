@@ -5,9 +5,10 @@ and the rendering quality of [`delta`](https://github.com/dandavison/delta). Bui
 workflow: watching and reviewing the changes an AI coding agent (like Claude Code) makes —
 live as it edits, or as the PR it opened.
 
-> Status: early development. See `PLAN.md` for the roadmap.
+> Status: v1 functionally complete (milestones M0–M7). A few DX extras are
+> backlogged (config-file loading, copy, context-expand, mouse) — see `PLAN.md`.
 
-## Features (target)
+## Features
 
 - File tree on the left, diff on the right — GitHub-like.
 - **Unified or side-by-side** view, toggleable.
@@ -20,6 +21,7 @@ live as it edits, or as the PR it opened.
 - **Review tracking**: mark files reviewed; persists per-repo; flags files that changed
   after you reviewed them.
 - Theme auto-detected from your terminal background (light/dark).
+- In-diff search (`/`), open-in-editor (`e`), help overlay (`?`).
 
 Read-only by design — gdiff never modifies your repo.
 
