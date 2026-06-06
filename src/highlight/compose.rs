@@ -8,12 +8,25 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use std::collections::BTreeSet;
 
-/// Byte ranges of ASCII-case-insensitive occurrences of `query` in `text`.
-/// ASCII case-folding preserves byte offsets, so the ranges are char-aligned.
+/// Byte ranges of occurrences of `query` in `text`, with **smart case**: the
+/// search is case-insensitive unless `query` contains an uppercase ASCII letter,
+/// in which case it's case-sensitive. ASCII case-folding preserves byte offsets,
+/// so the ranges stay char-aligned.
 pub fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
-    let hay = text.as_bytes().to_ascii_lowercase();
-    let needle = query.as_bytes().to_ascii_lowercase();
-    if needle.is_empty() || needle.len() > hay.len() {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let case_sensitive = query.bytes().any(|b| b.is_ascii_uppercase());
+    let fold = |b: u8| {
+        if case_sensitive {
+            b
+        } else {
+            b.to_ascii_lowercase()
+        }
+    };
+    let hay: Vec<u8> = text.bytes().map(fold).collect();
+    let needle: Vec<u8> = query.bytes().map(fold).collect();
+    if needle.len() > hay.len() {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -117,10 +130,20 @@ mod tests {
     use super::match_ranges;
 
     #[test]
-    fn finds_case_insensitive_occurrences() {
+    fn lowercase_query_is_case_insensitive() {
+        // Smart case: an all-lowercase query matches both cases.
         assert_eq!(
             match_ranges("let Greeting = greeting;", "greeting"),
             vec![(4, 12), (15, 23)]
+        );
+    }
+
+    #[test]
+    fn uppercase_in_query_is_case_sensitive() {
+        // An uppercase letter makes the search case-sensitive (smart case).
+        assert_eq!(
+            match_ranges("let Greeting = greeting;", "Greeting"),
+            vec![(4, 12)]
         );
     }
 
