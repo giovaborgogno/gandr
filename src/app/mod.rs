@@ -889,8 +889,14 @@ fn run_loop(
     terminal: &mut DefaultTerminal,
     watch: Option<&watcher::Watcher>,
 ) -> Result<()> {
+    // Event-driven: only redraw when something changed, so an idle gdiff uses ~no
+    // CPU (instead of repainting every tick).
+    let mut dirty = true;
     while !app.should_quit() {
-        terminal.draw(|f| app.render(f))?;
+        if dirty {
+            terminal.draw(|f| app.render(f))?;
+            dirty = false;
+        }
 
         // Drain pending file-change notifications; refresh once if any apply.
         if let Some(w) = watch {
@@ -900,18 +906,25 @@ fn run_loop(
             }
             if changed && app.auto_refresh() && app.spec_is_live() {
                 app.refresh();
+                dirty = true;
             }
         }
 
         if event::poll(TICK)? {
-            if let Event::Key(key) = event::read()? {
-                app.handle_key(key);
+            match event::read()? {
+                Event::Key(key) => {
+                    app.handle_key(key);
+                    dirty = true;
+                }
+                Event::Resize(_, _) => dirty = true,
+                _ => {}
             }
         }
 
         // Honor a queued editor request: suspend the TUI, run the editor, resume.
         if let Some((path, line)) = app.take_editor_request() {
             launch_editor(terminal, &path, line)?;
+            dirty = true;
         }
     }
     Ok(())

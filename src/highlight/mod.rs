@@ -25,8 +25,12 @@ pub enum ThemeMode {
 
 /// Detect light/dark from the terminal background via OSC 11 (termbg). Must run
 /// before entering raw mode / the alt-screen. Falls back to dark.
+///
+/// The timeout is deliberately short: local terminals answer OSC 11 in a few ms,
+/// so 25ms keeps startup snappy while still detecting; an unresponsive terminal
+/// (or a slow link) just falls back to dark after 25ms instead of stalling.
 pub fn detect_mode() -> ThemeMode {
-    match termbg::theme(std::time::Duration::from_millis(100)) {
+    match termbg::theme(std::time::Duration::from_millis(25)) {
         Ok(termbg::Theme::Light) => ThemeMode::Light,
         _ => ThemeMode::Dark,
     }
