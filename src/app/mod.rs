@@ -114,6 +114,9 @@ pub struct App {
     hl_requested: Option<(PathBuf, ThemeMode)>,
     /// Monotonic token; a highlight result is applied only if it still matches.
     hl_epoch: u64,
+    /// Same, for the Files-tab preview highlight (a separate async job).
+    browser_hl_requested: Option<(PathBuf, ThemeMode)>,
+    browser_hl_epoch: u64,
     /// Full annotated line list of the selected file (no folding), cached by
     /// path. Feeds the folded display rows and per-gap expand.
     full_cache: RefCell<(Option<PathBuf>, Rc<Vec<DiffLine>>)>,
@@ -251,6 +254,8 @@ impl App {
             diff_hl: RefCell::new(DiffHighlight::default()),
             hl_requested: None,
             hl_epoch: 0,
+            browser_hl_requested: None,
+            browser_hl_epoch: 0,
             full_cache: RefCell::new((None, Rc::new(Vec::new()))),
             display_cache: RefCell::new(DisplayRows::default()),
             expanded_folds: HashMap::new(),
@@ -489,6 +494,31 @@ impl App {
         self.hl_requested = Some(key);
         self.hl_epoch += 1;
         Some((self.hl_epoch, path, old_text, new_text, self.theme_mode))
+    }
+
+    /// A highlight job for the Files-tab preview, if its spans aren't ready and
+    /// none is in flight. Returns (epoch, path, lines, mode).
+    pub fn take_pending_browser_highlight(
+        &mut self,
+    ) -> Option<(u64, PathBuf, Vec<String>, ThemeMode)> {
+        if self.tab != Tab::Files {
+            return None;
+        }
+        let (path, lines) = self.browser.highlight_target()?;
+        let key = (path.clone(), self.theme_mode);
+        if self.browser_hl_requested.as_ref() == Some(&key) {
+            return None;
+        }
+        self.browser_hl_requested = Some(key);
+        self.browser_hl_epoch += 1;
+        Some((self.browser_hl_epoch, path, lines, self.theme_mode))
+    }
+
+    /// Apply a finished Files-preview highlight (dropped if stale).
+    pub fn apply_browser_highlight(&mut self, epoch: u64, path: PathBuf, spans: Vec<Vec<FgSpan>>) {
+        if epoch == self.browser_hl_epoch {
+            self.browser.apply_highlights(&path, spans);
+        }
     }
 
     /// Apply a finished highlight job, ignoring stale results (a newer selection
@@ -1742,6 +1772,10 @@ fn run_loop(
         if let Some((epoch, path, old, new, mode)) = app.take_pending_highlight() {
             jobs::spawn_highlight(tx.clone(), epoch, path, old, new, mode);
         }
+        // Same for the Files-tab preview (syntect on real code is slow).
+        if let Some((epoch, path, lines, mode)) = app.take_pending_browser_highlight() {
+            jobs::spawn_file_highlight(tx.clone(), epoch, path, lines, mode);
+        }
 
         match rx.recv() {
             Ok(jobs::AppEvent::Term(Event::Key(key))) => {
@@ -1771,6 +1805,10 @@ fn run_loop(
                 new,
             }) => {
                 app.apply_highlight(epoch, path, mode, old, new);
+                dirty = true;
+            }
+            Ok(jobs::AppEvent::BrowserHighlightReady { epoch, path, spans }) => {
+                app.apply_browser_highlight(epoch, path, spans);
                 dirty = true;
             }
             // The input thread holds a sender for the whole run, so recv only

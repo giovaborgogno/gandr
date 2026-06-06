@@ -3,7 +3,6 @@
 
 use crate::app::{App, Focus};
 use crate::browser::EntryKind;
-use crate::highlight::Highlighter;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -105,10 +104,6 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
         .content_scroll()
         .min(total.saturating_sub(height));
     let gutter_w = total.to_string().len().max(2);
-    // Large files aren't highlighted whole-file (see `browser::HL_MAX_LINES`); we
-    // highlight their visible lines per-render instead so selection stays instant.
-    let hl = Highlighter::for_path(&loaded.path, app.theme_mode());
-
     // Highlight content-search matches in the preview (after a repo content jump).
     let query = app.browser_query().filter(|q| !q.is_empty());
     let palette = crate::highlight::Palette::for_mode(app.theme_mode());
@@ -119,18 +114,11 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             format!("{:>gutter_w$} ", idx + 1),
             Style::default().fg(Color::DarkGray),
         )];
-        // Precomputed multi-line-aware spans (M12) when available, else a
-        // per-line highlight of just this visible line.
-        let fallback;
-        let fg = match loaded.highlights.get(idx) {
-            Some(v) => v.as_slice(),
-            None => {
-                fallback = hl.fg_spans(text);
-                &fallback
-            }
-        };
-        // Reuse the diff composer (no diff bg/word here) to get syntax fg plus
-        // the search-match highlight for free.
+        // Syntax spans arrive from a background job (`highlight_target`); until
+        // then `fg` is empty and the line renders plain — so selecting a file
+        // never blocks on syntect. The composer still applies the search match.
+        let empty = Vec::new();
+        let fg = loaded.highlights.get(idx).unwrap_or(&empty);
         spans.extend(crate::highlight::compose::line_spans(
             text,
             crate::diff::LineKind::Context,

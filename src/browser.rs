@@ -2,7 +2,7 @@
 //! git-ignored files/folders — only `.git/` is skipped), plus the content of the
 //! selected file. State lives here; rendering is in `ui::browser`.
 
-use crate::highlight::{FgSpan, Highlighter, ThemeMode};
+use crate::highlight::{FgSpan, ThemeMode};
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -99,31 +99,41 @@ impl Browser {
         browser
     }
 
-    /// Set the theme mode and re-highlight the currently loaded file (the app
-    /// resolves the real mode after the browser is constructed).
+    /// Set the theme mode and drop the loaded file's highlights so they're
+    /// recomputed (asynchronously) for the new theme.
     pub fn set_mode(&mut self, mode: ThemeMode) {
         if self.mode == mode {
             return;
         }
         self.mode = mode;
-        if let Some(loaded) = self.loaded.take() {
-            self.loaded = Some(self.rehighlight(loaded));
+        if let Some(loaded) = &mut self.loaded {
+            loaded.highlights = Vec::new();
         }
     }
 
-    /// Recompute a loaded file's highlight spans for the current mode. Whole-file
-    /// (multi-line aware) highlighting is O(file) and syntect is slow, so files
-    /// longer than [`HL_MAX_LINES`] are left unhighlighted here — the renderer
-    /// highlights just their visible lines instead, keeping file selection
-    /// instant on the (synchronous) Files tab.
-    fn rehighlight(&self, mut loaded: Loaded) -> Loaded {
-        let small = loaded.lines.len() <= HL_MAX_LINES;
-        loaded.highlights = if loaded.binary || loaded.too_large || !small {
-            Vec::new()
-        } else {
-            Highlighter::for_path(&loaded.path, self.mode).highlight_file(&loaded.lines)
-        };
-        loaded
+    pub fn mode(&self) -> ThemeMode {
+        self.mode
+    }
+
+    /// The loaded file's (path, lines) if it still needs highlighting — its spans
+    /// are empty and it's a previewable text file under [`HL_MAX_LINES`].
+    /// syntect is slow (~100ms+ for a few hundred lines of real code), so this is
+    /// done off-thread; the preview renders plain until the result lands.
+    pub fn highlight_target(&self) -> Option<(PathBuf, Vec<String>)> {
+        let l = self.loaded.as_ref()?;
+        if l.binary || l.too_large || !l.highlights.is_empty() || l.lines.len() > HL_MAX_LINES {
+            return None;
+        }
+        Some((l.path.clone(), l.lines.clone()))
+    }
+
+    /// Apply async highlight spans to the loaded file (ignored if it changed).
+    pub fn apply_highlights(&mut self, path: &Path, spans: Vec<Vec<FgSpan>>) {
+        if let Some(l) = &mut self.loaded {
+            if l.path == path {
+                l.highlights = spans;
+            }
+        }
     }
 
     /// Visible rows (cached; rebuilt from disk only when the expanded set changed).
@@ -402,8 +412,8 @@ impl Browser {
                 too_large: false,
             },
         };
-        // Highlight the whole file once now (carrying state across lines), so the
-        // renderer just indexes per-line spans instead of re-highlighting.
-        self.loaded = Some(self.rehighlight(loaded));
+        // Highlights are computed off-thread (see `highlight_target`); the preview
+        // renders plain until they land, so selecting a file never blocks.
+        self.loaded = Some(loaded);
     }
 }

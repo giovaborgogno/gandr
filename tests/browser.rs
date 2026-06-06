@@ -54,7 +54,14 @@ fn content_highlighting_is_multiline_aware() {
     .unwrap();
 
     let mut browser = Browser::new(root.to_path_buf());
-    // Cursor starts on the only file, which loads automatically.
+    // Cursor starts on the only file, which loads automatically (highlights are
+    // produced off-thread; drive that job by hand here).
+    assert!(
+        browser.loaded().unwrap().highlights.is_empty(),
+        "plain until highlighted"
+    );
+    warm(&mut browser);
+
     let loaded = browser.loaded().expect("file loaded");
     assert_eq!(loaded.path.file_name().unwrap(), "a.rs");
     // One highlight entry per line, computed with carried state.
@@ -71,8 +78,22 @@ fn content_highlighting_is_multiline_aware() {
         "interior of block comment should be comment-colored"
     );
 
-    // Re-highlighting under a different theme keeps the per-line structure.
+    // Changing theme drops the highlights so they're recomputed for the new mode.
     browser.set_mode(gdiff::highlight::ThemeMode::Light);
-    let loaded = browser.loaded().unwrap();
-    assert_eq!(loaded.highlights.len(), loaded.lines.len());
+    assert!(browser.loaded().unwrap().highlights.is_empty());
+    warm(&mut browser);
+    assert_eq!(
+        browser.loaded().unwrap().highlights.len(),
+        browser.loaded().unwrap().lines.len()
+    );
+}
+
+/// Drive the browser's async highlight to completion (the app does this via a
+/// background job + `apply_highlights`).
+fn warm(browser: &mut Browser) {
+    if let Some((path, lines)) = browser.highlight_target() {
+        let spans =
+            gdiff::highlight::Highlighter::for_path(&path, browser.mode()).highlight_file(&lines);
+        browser.apply_highlights(&path, spans);
+    }
 }

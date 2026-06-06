@@ -106,4 +106,57 @@ fn main() {
     bench("viewer rows(): unified, full file (per frame)", || {
         viewer_unified::rows(&full, &display, 120, &o_hl, &n_hl, &palette, true, None)
     });
+
+    // 6) Diff-tree row building for a big changeset (rebuilt while navigating).
+    let many: Vec<gdiff::diff::FileDiff> = (0..1000)
+        .map(|i| make_file(&format!("crate{}/src/mod{i}/file{i}.rs", i % 20)))
+        .collect();
+    let collapsed = std::collections::HashSet::new();
+    let trows = bench("tree::build_rows: 1000-file changeset", || {
+        gdiff::ui::tree::build_rows(&many, &collapsed)
+    });
+    println!("    └ {} tree rows", trows.len());
+
+    // 7) Real-repo navigation costs (set GDIFF_BENCH_REPO=/path/to/big/checkout).
+    if let Ok(repo) = std::env::var("GDIFF_BENCH_REPO") {
+        let root = std::path::PathBuf::from(&repo);
+        println!("-- real repo: {repo} --");
+        // The per-cursor-move cost in the Repo browser is read + highlight.
+        let mut sizes: Vec<(std::path::PathBuf, usize)> = Vec::new();
+        for p in ["src/main.ts", "src/vscode-dts/vscode.d.ts"] {
+            let f = root.join(p);
+            if let Ok(t) = std::fs::read_to_string(&f) {
+                sizes.push((f, t.lines().count()));
+            }
+        }
+        for (f, n) in &sizes {
+            let name = f.file_name().unwrap().to_string_lossy().into_owned();
+            bench(&format!("  fs::read {name} ({n} lines)"), || {
+                std::fs::read_to_string(f).unwrap()
+            });
+            let text = std::fs::read_to_string(f).unwrap();
+            let lines = engine::split_lines(&text);
+            let h = Highlighter::for_path(f, ThemeMode::Dark);
+            bench(&format!("  highlight_file {name} ({n} lines)"), || {
+                h.highlight_file(&lines)
+            });
+        }
+    } else {
+        println!("(set GDIFF_BENCH_REPO to measure on a real checkout)");
+    }
+}
+
+/// A trivial one-hunk FileDiff at `path`, for tree-building benchmarks.
+fn make_file(path: &str) -> gdiff::diff::FileDiff {
+    use gdiff::diff::engine::build_file_diff;
+    use gdiff::git::{FileChange, Status};
+    let change = FileChange {
+        path: std::path::PathBuf::from(path),
+        old_path: None,
+        status: Status::Modified,
+        is_binary: false,
+        additions: 0,
+        deletions: 0,
+    };
+    build_file_diff(change, Some(b"a\n"), Some(b"b\n"), 3)
 }

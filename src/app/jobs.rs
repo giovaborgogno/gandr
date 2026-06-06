@@ -43,6 +43,12 @@ pub enum AppEvent {
         old: Vec<Vec<FgSpan>>,
         new: Vec<Vec<FgSpan>>,
     },
+    /// A background highlight of the Files-tab preview finished.
+    BrowserHighlightReady {
+        epoch: u64,
+        path: PathBuf,
+        spans: Vec<Vec<FgSpan>>,
+    },
 }
 
 /// Forward terminal input on a background thread so the UI loop can block on a
@@ -134,5 +140,20 @@ pub fn spawn_highlight(
             old,
             new,
         });
+    });
+}
+
+/// Highlight the Files-tab preview off-thread (syntect is slow on real code), so
+/// moving the cursor over files never blocks.
+pub fn spawn_file_highlight(
+    tx: Sender<AppEvent>,
+    epoch: u64,
+    path: PathBuf,
+    lines: Vec<String>,
+    mode: ThemeMode,
+) {
+    std::thread::spawn(move || {
+        let spans = Highlighter::for_path(&path, mode).highlight_file(&lines);
+        let _ = tx.send(AppEvent::BrowserHighlightReady { epoch, path, spans });
     });
 }
