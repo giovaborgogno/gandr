@@ -594,6 +594,21 @@ fn diff_highlight_invalidates_on_same_path_edit() {
     assert_eq!(after.len(), 3);
 }
 
+#[test]
+fn unified_wraps_long_lines() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "short\n");
+    fx.commit("init");
+    // A long added line whose tail would be lost to truncation.
+    fx.write("a.txt", &format!("{}END\n", "x".repeat(100)));
+    let app = app_from(&fx);
+    let out = frame(&app, 90, 16);
+    assert!(
+        out.contains("END"),
+        "long line should wrap so its tail stays visible, not truncate:\n{out}"
+    );
+}
+
 // ---- tree navigation & hide toggle ----
 
 #[test]

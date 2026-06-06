@@ -22,8 +22,8 @@ fn num_cell(no: Option<u32>, width: usize) -> String {
 }
 
 /// Wrap styled spans to `width` display columns (char-count approximation),
-/// preserving each span's style across the split.
-fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
+/// preserving each span's style. Shared with the unified viewer.
+pub(crate) fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
     let width = width.max(1);
     let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();

@@ -132,6 +132,99 @@ fn line_row(
     Line::from(spans)
 }
 
+/// The fixed left-margin width of a diff row: two line-number columns, a space
+/// after each, the change bar, and a trailing space.
+fn prefix_width(w: usize) -> usize {
+    2 * w + 4
+}
+
+/// How many terminal rows a display row occupies once its text is wrapped to the
+/// panel width (1 for a fold marker, which isn't wrapped).
+fn row_height(row: &DiffRow, full: &[DiffLine], w: usize, width: usize) -> usize {
+    match row {
+        DiffRow::Fold { .. } => 1,
+        DiffRow::Line(idx) => match full.get(*idx) {
+            Some(line) => {
+                let text_w = width.saturating_sub(prefix_width(w)).max(1);
+                line.text.chars().count().div_ceil(text_w).max(1)
+            }
+            None => 1,
+        },
+    }
+}
+
+/// Build a diff line as one-or-more wrapped terminal rows: the gutter + change
+/// bar lead the first row, continuation rows keep the bar with a blank gutter,
+/// and each row's background fills to `width` (delta-style). `is_cursor` reverses
+/// the line-number gutter on the first row ("you are here").
+#[allow(clippy::too_many_arguments)]
+fn line_rows_wrapped(
+    line: &DiffLine,
+    w: usize,
+    width: usize,
+    fg: &[FgSpan],
+    palette: &Palette,
+    word_on: bool,
+    query: Option<&str>,
+    is_cursor: bool,
+) -> Vec<Line<'static>> {
+    let (bar, bar_color, base_bg) = match line.kind {
+        LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
+        LineKind::Del => ('▌', Color::Red, Some(palette.del_bg)),
+        LineKind::Context => (' ', Color::DarkGray, None),
+    };
+    let prefix = prefix_width(w);
+    let text_w = width.saturating_sub(prefix).max(1);
+    let text_spans = compose::line_spans(
+        &line.text,
+        line.kind,
+        &line.segments,
+        fg,
+        palette,
+        word_on,
+        query,
+    );
+    let wrapped = crate::ui::viewer_split::wrap_spans(&text_spans, text_w);
+
+    let gutter_style = if is_cursor {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let mut out = Vec::with_capacity(wrapped.len().max(1));
+    for (k, chunk) in wrapped.iter().enumerate() {
+        let gutter = if k == 0 {
+            format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w))
+        } else {
+            " ".repeat(2 * w + 2) // continuation: blank line numbers, keep the bar
+        };
+        let mut spans = vec![
+            Span::styled(gutter, gutter_style),
+            Span::styled(bar.to_string(), Style::default().fg(bar_color)),
+            Span::raw(" "),
+        ];
+        spans.extend(chunk.iter().cloned());
+        if let Some(bg) = base_bg {
+            let used = prefix
+                + chunk
+                    .iter()
+                    .map(|s| s.content.chars().count())
+                    .sum::<usize>();
+            if used < width {
+                spans.push(Span::styled(
+                    " ".repeat(width - used),
+                    Style::default().bg(bg),
+                ));
+            }
+        }
+        out.push(Line::from(spans));
+    }
+    if out.is_empty() {
+        out.push(Line::from(""));
+    }
+    out
+}
+
 /// Build one display row (a fold marker or a diff line) as a styled [`Line`].
 #[allow(clippy::too_many_arguments)]
 fn build_row(
@@ -207,23 +300,51 @@ pub fn render(
         width: area.width.saturating_sub(1),
         ..area
     };
-    // One display row == one terminal row here, so we build only the visible
-    // window — per-frame cost is O(viewport), independent of file size.
     let total = display.len();
     let height = area.height as usize;
-    let effective = scroll.min(total.saturating_sub(height));
     let w = gutter_width(full);
     let width = content.width as usize;
-    let visible: Vec<Line> = display[effective..(effective + height).min(total)]
-        .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            let is_cursor = focused && effective + i == cursor;
-            build_row(
-                row, full, w, width, old_hl, new_hl, palette, word_on, query, is_cursor,
-            )
-        })
-        .collect();
-    f.render_widget(Paragraph::new(visible), content);
-    super::render_scrollbar(f, area, total, effective);
+
+    // Long lines wrap, so a display row may take several terminal rows. Pick the
+    // first display row to draw (`top`): start from the viewport-follow scroll,
+    // pull up if the cursor is above it, then push down until the cursor's wrapped
+    // rows fit in `height` — so the cursor is always visible without measuring
+    // the whole (possibly huge) file.
+    let mut top = scroll.min(total.saturating_sub(1)).min(cursor);
+    while top < cursor {
+        let used: usize = (top..=cursor)
+            .map(|i| row_height(&display[i], full, w, width))
+            .sum();
+        if used <= height {
+            break;
+        }
+        top += 1;
+    }
+
+    // Build wrapped terminal rows from `top` until the panel is full.
+    let mut term_rows: Vec<Line> = Vec::with_capacity(height);
+    let mut di = top;
+    while di < total && term_rows.len() < height {
+        let is_cursor = focused && di == cursor;
+        match &display[di] {
+            DiffRow::Fold { hidden, .. } => term_rows.push(fold_marker(*hidden, width, is_cursor)),
+            DiffRow::Line(idx) => {
+                if let Some(line) = full.get(*idx) {
+                    let fg = line_fg(line, old_hl, new_hl);
+                    for row in
+                        line_rows_wrapped(line, w, width, fg, palette, word_on, query, is_cursor)
+                    {
+                        if term_rows.len() < height {
+                            term_rows.push(row);
+                        }
+                    }
+                }
+            }
+        }
+        di += 1;
+    }
+    f.render_widget(Paragraph::new(term_rows), content);
+    // Scrollbar is approximated in display rows (cheap; exact terminal-row counts
+    // would require measuring the whole file).
+    super::render_scrollbar(f, area, total, top);
 }
