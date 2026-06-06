@@ -5,6 +5,8 @@
 
 use crate::git::FileChange;
 
+pub mod engine;
+
 /// Whether a line was added, removed, or is unchanged context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {

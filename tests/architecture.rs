@@ -22,6 +22,11 @@ fn rust_files_outside_git(dir: &Path, git_dir: &Path, out: &mut Vec<std::path::P
             }
             rust_files_outside_git(&path, git_dir, out);
         } else if path.extension().is_some_and(|e| e == "rs") {
+            // testutil *constructs* fixture repos with git2; it's a test helper,
+            // not app code, so it's exempt from the GitBackend layering rule.
+            if path.file_name().is_some_and(|n| n == "testutil.rs") {
+                continue;
+            }
             out.push(path);
         }
     }

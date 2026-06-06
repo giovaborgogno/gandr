@@ -7,6 +7,8 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+pub mod git2_backend;
+
 /// What to compare. The bare `gdiff` default is [`CompareSpec::Uncommitted`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompareSpec {

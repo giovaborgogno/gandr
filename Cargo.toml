@@ -34,11 +34,13 @@ crossbeam-channel = "0.5"
 # Errors
 anyhow = "1"
 
+# Temp git repos for the `testutil` fixture helper (used by tests + examples,
+# never by the binary's real code path).
+tempfile = "3"
+
 [dev-dependencies]
 # Snapshot testing of rendered TUI frames (see docs/testing.md)
 insta = "1"
-# Temp git repos for fixtures
-tempfile = "3"
 
 [profile.release]
 opt-level = 3

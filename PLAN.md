@@ -9,7 +9,7 @@
 ## Status
 
 - [x] M0 — Scaffold + skeleton
-- [ ] M1 — Git + diff model (no TUI)
+- [x] M1 — Git + diff model (no TUI)
 - [ ] M2 — Core TUI (unified)
 - [ ] M3 — Delta-style rendering
 - [ ] M4 — Tree + side-by-side
@@ -84,12 +84,12 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] CI green (gate: fmt + clippy -D warnings + test).
 - Deliverable: runs, shows an empty frame, quits cleanly.
 
-### M1 — Git + diff model (no TUI)
-- [ ] `GitBackend` trait + `git2_backend` for `CompareSpec::Uncommitted`.
-- [ ] `diff::engine` via imara-diff → `FileDiff` (line hunks). Word segments may be stubbed.
-- [ ] `testutil` fixture helper: build temp git repos with known changes (git2 + tempfile).
-- [ ] Unit tests on the diff engine against fixtures.
-- [ ] Temporary debug printer (stdout) to eyeball diffs.
+### M1 — Git + diff model (no TUI) ✅
+- [x] `GitBackend` trait + `git2_backend` for `CompareSpec::Uncommitted`.
+- [x] `diff::engine` via imara-diff → `FileDiff` (line hunks + context folding). Word segments stubbed (M3).
+- [x] `testutil` fixture helper: build temp git repos with known changes (git2 + tempfile).
+- [x] Unit tests on the diff engine against fixtures (modify, add, delete, rename, binary, multi-hunk, context cap).
+- [x] Temporary debug printer (`cargo run --example dump_diff`).
 - Deliverable: `cargo test` proves the engine produces correct diffs.
 
 ### M2 — Core TUI (unified)
