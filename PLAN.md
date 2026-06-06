@@ -141,7 +141,7 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ## v2 — post-v1 roadmap (requested)
 
-- [ ] M8 — Tabs + repo file browser. gitui-style tab bar (`Diff [1] · Files [2]`).
+- [x] M8 — Tabs + repo file browser. gitui-style tab bar (`Diff [1] · Files [2]`).
       New **Files** tab: lazy tree of the whole working tree (incl. git-ignored
       files/folders; only `.git/` is skipped), selecting a file shows its content
       syntax-highlighted.
@@ -156,12 +156,10 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       (`git diff -U<n>`-style). Header shows `⊕N ctx` while expanded. (A per-gap
       "⋯ expand here ⋯" affordance remains a future refinement — see backlog.)
 - [x] M12 — Multi-line syntax highlighting (carry syntect state across a file).
-      The Files-tab content viewer highlights the whole file with one
-      `HighlightLines` (block comments / multi-line strings render correctly),
-      computed once at load (cached in `Loaded.highlights`), re-run on theme
-      change. The diff viewer still highlights per-line — correct old/new
-      multi-line there needs full file text threaded in (see backlog).
-- [ ] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
+      The Files-tab content viewer and the diff viewer both highlight each file
+      with one `HighlightLines` (block comments / multi-line strings render
+      correctly), computed once and cached, re-run on theme change.
+- [x] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
       NOT tokio — git2/FS/grep are blocking libs, so a thread pool + an
       epoch token for superseding stale work is the right model). Unified event
       loop (terminal input + job results + file-watch on one channel). Heavy
