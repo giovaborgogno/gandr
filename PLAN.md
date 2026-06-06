@@ -223,7 +223,7 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 ## Pre-publish (before flipping `publish` / open-sourcing)
 
 - [x] **Renamed `gdiff` → `gandr`** (crate, binary, docs, review-state dir `.git/gandr/`).
-- [x] License: `MIT OR Apache-2.0`; added `LICENSE-MIT` + `LICENSE-APACHE`.
+- [x] License: `MIT`; added `LICENSE`.
 - [x] crates.io metadata (authors, repository, keywords, categories, readme, `exclude`); `publish = true`.
 - [x] Polished README (features for both tabs, key reference, install).
 - [ ] **Confirm the GitHub repo URL** in `Cargo.toml` (`repository`/`homepage` currently

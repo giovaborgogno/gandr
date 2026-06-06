@@ -2,9 +2,9 @@
 name = "gandr"
 version = "0.1.0"
 edition = "2021"
-description = "A read-only TUI for reviewing git diffs — delta-style highlighting, GitHub-like side-by-side, built for reviewing AI coding-agent changes."
+description = "A read-only TUI to review code changes and browse your repo — delta-style diffs, GitHub-like side-by-side, built for reviewing AI coding-agent changes."
 authors = ["Giovanni Borgogno <giovaborgogno@gmail.com>"]
-license = "MIT OR Apache-2.0"
+license = "MIT"
 readme = "README.md"
 # TODO(pre-publish): confirm this matches your actual GitHub repo before `cargo publish`.
 repository = "https://github.com/giovaborgogno/gandr"

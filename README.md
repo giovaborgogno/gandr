@@ -1,9 +1,12 @@
 # gandr
 
-A read-only terminal UI for **reviewing git diffs** — with the clarity of GitHub's diff view
-and the rendering quality of [`delta`](https://github.com/dandavison/delta). Built for one
-workflow: watching and reviewing the changes an AI coding agent (like Claude Code) makes —
-live as it edits, or as the PR it opened.
+**Review code changes and browse your repo, from the terminal.** A read-only TUI with the
+clarity of GitHub's diff view and the rendering quality of
+[`delta`](https://github.com/dandavison/delta). Built for one workflow: watching the changes
+an AI coding agent (like Claude Code) makes — live as it edits, or as the PR it opened — then
+exploring the rest of the codebase without leaving your terminal.
+
+![gandr in action](https://raw.githubusercontent.com/giovaborgogno/gandr/main/docs/demo.gif)
 
 > Status: feature-complete and stable. Two tabs — a **Diff** reviewer and a
 > **Repo** browser — with live refresh, review tracking, and repo-wide search.
@@ -88,3 +91,7 @@ cargo run --example render     # render a frame to stdout as text
 cargo test                     # unit + snapshot tests
 cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
