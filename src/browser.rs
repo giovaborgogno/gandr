@@ -10,6 +10,11 @@ use std::path::{Path, PathBuf};
 /// Don't read files larger than this into the content preview.
 const MAX_PREVIEW_BYTES: u64 = 2_000_000;
 
+/// Files up to this many lines get whole-file (multi-line aware) highlighting at
+/// load; longer files are highlighted per visible line at render time instead, so
+/// selecting them stays instant. ~1200 lines is well under a perceptible hitch.
+pub const HL_MAX_LINES: usize = 1200;
+
 /// What a visible browser row is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
@@ -106,9 +111,14 @@ impl Browser {
         }
     }
 
-    /// Recompute a loaded file's highlight spans for the current mode.
+    /// Recompute a loaded file's highlight spans for the current mode. Whole-file
+    /// (multi-line aware) highlighting is O(file) and syntect is slow, so files
+    /// longer than [`HL_MAX_LINES`] are left unhighlighted here — the renderer
+    /// highlights just their visible lines instead, keeping file selection
+    /// instant on the (synchronous) Files tab.
     fn rehighlight(&self, mut loaded: Loaded) -> Loaded {
-        loaded.highlights = if loaded.binary || loaded.too_large {
+        let small = loaded.lines.len() <= HL_MAX_LINES;
+        loaded.highlights = if loaded.binary || loaded.too_large || !small {
             Vec::new()
         } else {
             Highlighter::for_path(&loaded.path, self.mode).highlight_file(&loaded.lines)

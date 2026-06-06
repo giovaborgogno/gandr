@@ -11,7 +11,7 @@ pub mod viewer_unified;
 use crate::app::{App, Focus, Tab};
 use crate::config::ViewMode;
 use crate::diff::FileDiff;
-use crate::highlight::Palette;
+use crate::highlight::{FgSpan, Palette};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -519,10 +519,14 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     let mode = app.theme_mode();
     let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
-    // Per-file syntax highlight spans, computed with carried state across the
-    // whole file (M12) and cached — so block comments / multi-line strings are
-    // correct in the diff, not just the Files tab.
-    let (old_hl, new_hl) = app.diff_highlight();
+    // Cached, multi-line-aware syntax spans (M12), filled by a background job.
+    // Until it lands the slices are empty and the viewer renders plain
+    // foreground — so selecting a large file never blocks on syntect.
+    let highlight = app.diff_highlight();
+    let (old_hl, new_hl): (&[Vec<FgSpan>], &[Vec<FgSpan>]) = match &highlight {
+        Some((o, n)) => (o, n),
+        None => (&[], &[]),
+    };
     // Folded display rows (per-gap expand) over the file's full line list.
     let full = app.full_lines();
     let display = app.display_rows();
@@ -538,8 +542,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
             &full,
             &display,
             app.scroll(),
-            &old_hl,
-            &new_hl,
+            old_hl,
+            new_hl,
             &palette,
             word_on,
             query,
@@ -550,8 +554,8 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
             &full,
             &display,
             app.scroll(),
-            &old_hl,
-            &new_hl,
+            old_hl,
+            new_hl,
             &palette,
             word_on,
             query,

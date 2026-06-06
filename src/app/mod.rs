@@ -9,7 +9,7 @@ use crate::diff::fold::{self, DiffRow};
 use crate::diff::{engine, FileDiff, Line as DiffLine};
 use crate::fuzzy;
 use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext};
-use crate::highlight::{FgSpan, Highlighter, ThemeMode};
+use crate::highlight::{FgSpan, ThemeMode};
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::search::{SearchMode, SearchResults};
 use crate::ui;
@@ -102,9 +102,15 @@ pub struct App {
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
     /// Cached stateful syntax-highlight spans for the selected file's old/new
-    /// sides (M12), keyed by (path, theme). Recomputed lazily on render when the
-    /// selection or theme changes — never per frame.
+    /// sides (M12), keyed by (path, theme). Filled by a background job
+    /// (`spawn_highlight`); until it lands the viewer falls back to per-line
+    /// highlighting, so selecting a large file never blocks the UI.
     diff_hl: RefCell<DiffHighlight>,
+    /// The (path, theme) a highlight job has been spawned for (avoids respawning
+    /// while one is in flight).
+    hl_requested: Option<(PathBuf, ThemeMode)>,
+    /// Monotonic token; a highlight result is applied only if it still matches.
+    hl_epoch: u64,
     /// Full annotated line list of the selected file (no folding), cached by
     /// path. Feeds the folded display rows and per-gap expand.
     full_cache: RefCell<(Option<PathBuf>, Rc<Vec<DiffLine>>)>,
@@ -234,6 +240,8 @@ impl App {
             tree_scroll: Cell::new(0),
             viewport: Cell::new(0),
             diff_hl: RefCell::new(DiffHighlight::default()),
+            hl_requested: None,
+            hl_epoch: 0,
             full_cache: RefCell::new((None, Rc::new(Vec::new()))),
             display_cache: RefCell::new(DisplayRows::default()),
             expanded_folds: HashMap::new(),
@@ -408,32 +416,58 @@ impl App {
         self.viewport.set(rows);
     }
 
-    /// Stateful syntax-highlight spans for the selected file's old and new sides
-    /// (indexed by `old_no-1` / `new_no-1`). Computed once per (file, theme) and
-    /// cached; the `Rc` clones are cheap, so the renderer can call this per frame.
-    pub fn diff_highlight(&self) -> (SideHighlight, SideHighlight) {
+    /// Cached stateful highlight spans for the selected file (old, new sides),
+    /// if the background job has produced them for the current (path, theme).
+    /// `None` means "not ready" — the viewer highlights per-line meanwhile.
+    pub fn diff_highlight(&self) -> Option<(SideHighlight, SideHighlight)> {
         let key = self
             .current()
             .map(|f| (f.change.path.clone(), self.theme_mode));
-        if self.diff_hl.borrow().key == key {
-            let cache = self.diff_hl.borrow();
-            return (cache.old.clone(), cache.new.clone());
-        }
-        let (old, new) = match self.current() {
-            Some(f) => {
-                let hl = Highlighter::for_path(&f.change.path, self.theme_mode);
-                (
-                    Rc::new(hl.highlight_file(&engine::split_lines(&f.old_text))),
-                    Rc::new(hl.highlight_file(&engine::split_lines(&f.new_text))),
-                )
-            }
-            None => (Rc::new(Vec::new()), Rc::new(Vec::new())),
+        let cache = self.diff_hl.borrow();
+        (cache.key.is_some() && cache.key == key).then(|| (cache.old.clone(), cache.new.clone()))
+    }
+
+    /// A highlight job to spawn for the selected file, if its spans aren't cached
+    /// and none is already in flight. Returns (epoch, path, old_text, new_text, mode).
+    pub fn take_pending_highlight(&mut self) -> Option<(u64, PathBuf, String, String, ThemeMode)> {
+        // Snapshot what the job needs, then drop the borrow on `self` before
+        // mutating the request/epoch bookkeeping.
+        let (path, old_text, new_text) = {
+            let file = self.current()?;
+            (
+                file.change.path.clone(),
+                file.old_text.clone(),
+                file.new_text.clone(),
+            )
         };
-        let mut cache = self.diff_hl.borrow_mut();
-        cache.key = key;
-        cache.old = Rc::clone(&old);
-        cache.new = Rc::clone(&new);
-        (old, new)
+        let key = (path.clone(), self.theme_mode);
+        if self.diff_hl.borrow().key.as_ref() == Some(&key)
+            || self.hl_requested.as_ref() == Some(&key)
+        {
+            return None; // already cached, or a job is in flight for this key
+        }
+        self.hl_requested = Some(key);
+        self.hl_epoch += 1;
+        Some((self.hl_epoch, path, old_text, new_text, self.theme_mode))
+    }
+
+    /// Apply a finished highlight job, ignoring stale results (a newer selection
+    /// or content change superseded it).
+    pub fn apply_highlight(
+        &mut self,
+        epoch: u64,
+        path: PathBuf,
+        mode: ThemeMode,
+        old: Vec<Vec<FgSpan>>,
+        new: Vec<Vec<FgSpan>>,
+    ) {
+        if epoch != self.hl_epoch {
+            return;
+        }
+        let cache = self.diff_hl.get_mut();
+        cache.key = Some((path, mode));
+        cache.old = Rc::new(old);
+        cache.new = Rc::new(new);
     }
 
     /// The full annotated line list of the selected file (no folding), cached by
@@ -482,6 +516,10 @@ impl App {
     /// doesn't reuse stale content.
     fn invalidate_file_caches(&mut self) {
         self.diff_hl.get_mut().key = None;
+        // Drop any in-flight highlight and bump the epoch so a stale result for
+        // the old content is ignored; a fresh job is requested on next render.
+        self.hl_requested = None;
+        self.hl_epoch = self.hl_epoch.wrapping_add(1);
         self.full_cache.get_mut().0 = None;
         self.display_cache.get_mut().key = None;
         self.expanded_folds.clear();
@@ -1471,6 +1509,13 @@ fn run_loop(
             continue;
         }
 
+        // Kick off highlighting the selected file off-thread (fire-and-forget;
+        // the current frame already shows the per-line fallback). No redraw or
+        // `continue` — when it lands, HighlightReady triggers a repaint.
+        if let Some((epoch, path, old, new, mode)) = app.take_pending_highlight() {
+            jobs::spawn_highlight(tx.clone(), epoch, path, old, new, mode);
+        }
+
         match rx.recv() {
             Ok(jobs::AppEvent::Term(Event::Key(key))) => {
                 app.handle_key(key);
@@ -1489,6 +1534,16 @@ fn run_loop(
             }
             Ok(jobs::AppEvent::SearchReady { epoch, results }) => {
                 app.apply_search_result(epoch, results);
+                dirty = true;
+            }
+            Ok(jobs::AppEvent::HighlightReady {
+                epoch,
+                path,
+                mode,
+                old,
+                new,
+            }) => {
+                app.apply_highlight(epoch, path, mode, old, new);
                 dirty = true;
             }
             // The input thread holds a sender for the whole run, so recv only

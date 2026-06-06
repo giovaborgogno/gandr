@@ -3,7 +3,7 @@
 
 use crate::app::{App, Focus};
 use crate::browser::EntryKind;
-use crate::highlight::FgSpan;
+use crate::highlight::{FgSpan, Highlighter};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -122,6 +122,9 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
         .content_scroll()
         .min(total.saturating_sub(height));
     let gutter_w = total.to_string().len().max(2);
+    // Large files aren't highlighted whole-file (see `browser::HL_MAX_LINES`); we
+    // highlight their visible lines per-render instead so selection stays instant.
+    let hl = Highlighter::for_path(&loaded.path, app.theme_mode());
 
     let mut lines: Vec<Line> = Vec::new();
     for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
@@ -129,9 +132,16 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             format!("{:>gutter_w$} ", idx + 1),
             Style::default().fg(Color::DarkGray),
         )];
-        // Per-line spans precomputed with carried state (multi-line aware, M12).
-        let empty = Vec::new();
-        let fg = loaded.highlights.get(idx).unwrap_or(&empty);
+        // Precomputed multi-line-aware spans (M12) when available, else a
+        // per-line highlight of just this visible line.
+        let fallback;
+        let fg = match loaded.highlights.get(idx) {
+            Some(v) => v.as_slice(),
+            None => {
+                fallback = hl.fg_spans(text);
+                &fallback
+            }
+        };
         spans.extend(syntax_spans(text, fg));
         lines.push(Line::from(spans));
     }

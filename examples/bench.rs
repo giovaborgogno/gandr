@@ -1,10 +1,14 @@
 //! Micro-benchmarks for gdiff's hot paths. Run with `cargo run --release --example bench`.
 
-use gdiff::browser::Browser;
-use gdiff::diff::engine;
+use gdiff::diff::fold;
+use gdiff::diff::{engine, FileDiff};
 use gdiff::git::git2_backend::Git2Backend;
 use gdiff::git::CompareSpec;
+use gdiff::highlight::{Highlighter, Palette, ThemeMode};
 use gdiff::testutil::Fixture;
+use gdiff::{browser::Browser, ui::viewer_unified};
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Instant;
 
 fn bench<T>(label: &str, f: impl Fn() -> T) -> T {
@@ -70,4 +74,36 @@ fn main() {
     });
     println!("    └ {} visible rows", rows.len());
     let _ = browser;
+
+    // 4) The work done when SELECTING a large file in the diff viewer (all on the
+    //    UI thread, cached after the first hit): full annotated lines, both-side
+    //    stateful highlight, and folding. This is the "no lag on navigation" path.
+    let big: &FileDiff = &d[0];
+    let full = bench("all_lines: 5000-line file (per-selection)", || {
+        engine::all_lines(&big.old_text, &big.new_text)
+    });
+    println!("    └ {} lines", full.len());
+
+    let hl = Highlighter::for_path(Path::new("big.rs"), ThemeMode::Dark);
+    bench(
+        "highlight_file ×2 sides: 5000 lines (per-selection)",
+        || {
+            let o = hl.highlight_file(&engine::split_lines(&big.old_text));
+            let n = hl.highlight_file(&engine::split_lines(&big.new_text));
+            (o, n)
+        },
+    );
+
+    let display = bench("fold: 5000-line file (per render/key)", || {
+        fold::fold(&full, 3, &HashMap::new())
+    });
+    println!("    └ {} display rows", display.len());
+
+    // 5) Building the unified viewer rows for the visible window (per frame).
+    let palette = Palette::for_mode(ThemeMode::Dark);
+    let o_hl = hl.highlight_file(&engine::split_lines(&big.old_text));
+    let n_hl = hl.highlight_file(&engine::split_lines(&big.new_text));
+    bench("viewer rows(): unified, full file (per frame)", || {
+        viewer_unified::rows(&full, &display, 120, &o_hl, &n_hl, &palette, true, None)
+    });
 }

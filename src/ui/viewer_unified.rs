@@ -49,9 +49,11 @@ fn num_cell(no: Option<u32>, width: usize) -> String {
     }
 }
 
-/// The precomputed syntax spans for a line: a deleted line reads from the old
-/// side (`old_no`), everything else from the new side (`new_no`). Empty if the
-/// line number is out of range (shouldn't happen for a well-formed diff).
+/// Cached syntax spans for a line: a deleted line reads from the old side
+/// (`old_no`), everything else from the new side (`new_no`). Empty when the
+/// highlight job hasn't produced this file's spans yet — the line then renders
+/// with plain foreground (diff backgrounds still apply), so selecting a large
+/// file never blocks on syntect; the colors fill in when the job lands.
 pub(crate) fn line_fg<'a>(
     line: &DiffLine,
     old_hl: &'a [Vec<FgSpan>],
@@ -112,6 +114,31 @@ fn line_row(
 }
 
 /// Build every display row of the file's folded diff as a styled [`Line`].
+/// Build one display row (a fold marker or a diff line) as a styled [`Line`].
+#[allow(clippy::too_many_arguments)]
+fn build_row(
+    row: &DiffRow,
+    full: &[DiffLine],
+    w: usize,
+    width: usize,
+    old_hl: &[Vec<FgSpan>],
+    new_hl: &[Vec<FgSpan>],
+    palette: &Palette,
+    word_on: bool,
+    query: Option<&str>,
+) -> Line<'static> {
+    match row {
+        DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width),
+        DiffRow::Line(idx) => {
+            let line = &full[*idx];
+            let fg = line_fg(line, old_hl, new_hl);
+            line_row(line, w, width, fg, palette, word_on, query)
+        }
+    }
+}
+
+/// Build every display row (used by tests/benches; `render` windows to the
+/// visible slice so per-frame cost stays O(viewport), not O(file)).
 #[allow(clippy::too_many_arguments)]
 pub fn rows(
     full: &[DiffLine],
@@ -126,14 +153,7 @@ pub fn rows(
     let w = gutter_width(full);
     display
         .iter()
-        .map(|row| match row {
-            DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width),
-            DiffRow::Line(idx) => {
-                let line = &full[*idx];
-                let fg = line_fg(line, old_hl, new_hl);
-                line_row(line, w, width, fg, palette, word_on, query)
-            }
-        })
+        .map(|row| build_row(row, full, w, width, old_hl, new_hl, palette, word_on, query))
         .collect()
 }
 
@@ -159,20 +179,17 @@ pub fn render(
         width: area.width.saturating_sub(1),
         ..area
     };
-    let all = rows(
-        full,
-        display,
-        content.width as usize,
-        old_hl,
-        new_hl,
-        palette,
-        word_on,
-        query,
-    );
-    let total = all.len();
+    // One display row == one terminal row here, so we build only the visible
+    // window — per-frame cost is O(viewport), independent of file size.
+    let total = display.len();
     let height = area.height as usize;
     let effective = scroll.min(total.saturating_sub(height));
-    let visible: Vec<Line> = all.into_iter().skip(effective).take(height).collect();
+    let w = gutter_width(full);
+    let width = content.width as usize;
+    let visible: Vec<Line> = display[effective..(effective + height).min(total)]
+        .iter()
+        .map(|row| build_row(row, full, w, width, old_hl, new_hl, palette, word_on, query))
+        .collect();
     f.render_widget(Paragraph::new(visible), content);
     super::render_scrollbar(f, area, total, effective);
 }

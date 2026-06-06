@@ -11,6 +11,7 @@ use crate::diff::engine;
 use crate::diff::FileDiff;
 use crate::git::git2_backend::Git2Backend;
 use crate::git::CompareSpec;
+use crate::highlight::{FgSpan, Highlighter, ThemeMode};
 use crate::search::{self, SearchMode, SearchResults};
 use anyhow::Result;
 use crossbeam_channel::Sender;
@@ -30,6 +31,16 @@ pub enum AppEvent {
     FileChanged,
     /// A background repo-wide search finished (tagged with the requesting epoch).
     SearchReady { epoch: u64, results: SearchResults },
+    /// A background syntax-highlight of the selected file finished. Per-line
+    /// spans for the old and new sides; the UI renders per-line (no carried
+    /// state) until this arrives, so navigation never blocks.
+    HighlightReady {
+        epoch: u64,
+        path: PathBuf,
+        mode: ThemeMode,
+        old: Vec<Vec<FgSpan>>,
+        new: Vec<Vec<FgSpan>>,
+    },
 }
 
 /// Forward terminal input on a background thread so the UI loop can block on a
@@ -72,5 +83,29 @@ pub fn spawn_search(
     std::thread::spawn(move || {
         let results = search::run(&root, &query, mode);
         let _ = tx.send(AppEvent::SearchReady { epoch, results });
+    });
+}
+
+/// Highlight the selected file's two sides on a background thread (syntect is
+/// O(file) and slow on large files), posting the per-line spans tagged `epoch`.
+pub fn spawn_highlight(
+    tx: Sender<AppEvent>,
+    epoch: u64,
+    path: PathBuf,
+    old_text: String,
+    new_text: String,
+    mode: ThemeMode,
+) {
+    std::thread::spawn(move || {
+        let hl = Highlighter::for_path(&path, mode);
+        let old = hl.highlight_file(&engine::split_lines(&old_text));
+        let new = hl.highlight_file(&engine::split_lines(&new_text));
+        let _ = tx.send(AppEvent::HighlightReady {
+            epoch,
+            path,
+            mode,
+            old,
+            new,
+        });
     });
 }
