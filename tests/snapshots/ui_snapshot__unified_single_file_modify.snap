@@ -2,9 +2,9 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 14)"
 ---
-" Diff [1]   Files [2]   <repo>
-"gdiff · main · uncommitted · 1 file  +1 −1 · 0/1 reviewed · ◉ watching          "
-"┌Files (1)─────────────────────┐┌──────────────────────────────────────────────┐"
+" Diff   Files                                            main · uncommitted · ◉ "
+"────────────────────────────────────────────────────────────────────────────────"
+"┌ Changes  +1 −1  0/1 ─────────┐┌──────────────────────────────────────────────┐"
 "│▾ src/                        ││src/lib.rs  +1 −1  [1/1]                      │"
 "│    M lib.rs                  ││ 1  1   fn one() {}                           │"
 "│                              ││ 2    ▌ fn two() {}                           │"

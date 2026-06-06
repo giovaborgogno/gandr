@@ -331,7 +331,8 @@ impl App {
             .collect();
     }
 
-    fn reviewed_count(&self) -> usize {
+    /// Number of files marked reviewed (for the panel title).
+    pub fn reviewed_count(&self) -> usize {
         self.review_cache
             .iter()
             .filter(|s| **s == ReviewStatus::Reviewed)
@@ -350,29 +351,49 @@ impl App {
         })
     }
 
-    /// The header line: comparison + branch + file count + totals.
+    /// The current branch (or `(detached)`), for the header.
+    pub fn branch(&self) -> &str {
+        self.context.branch.as_deref().unwrap_or("(detached)")
+    }
+
+    /// The comparison label (a PR title if set, else the spec's label).
+    pub fn comparison_label(&self) -> String {
+        self.title.clone().unwrap_or_else(|| self.spec.label())
+    }
+
+    /// Whether the working tree is being watched (live comparison + auto-refresh).
+    pub fn is_watching(&self) -> bool {
+        self.auto_refresh && self.spec.is_live()
+    }
+
+    /// The active context-fold window (3 = default/tightest).
+    pub fn context_lines(&self) -> usize {
+        self.config.context_lines
+    }
+
+    /// A complete one-line state summary (branch, comparison, totals, reviewed,
+    /// indicators). The header renders a compact subset; this stays the canonical
+    /// summary used in tests/debugging.
     pub fn header_line(&self) -> String {
-        let branch = self.context.branch.as_deref().unwrap_or("(detached)");
         let (add, del) = self.totals();
         let n = self.files.len();
         let files = if n == 1 { "file" } else { "files" };
-        let label = self.title.clone().unwrap_or_else(|| self.spec.label());
         let reviewed = self.reviewed_count();
-        let watch = if self.auto_refresh && self.spec.is_live() {
+        let watch = if self.is_watching() {
             " · ◉ watching"
         } else {
             ""
         };
         let load = if self.loading { " · ⟳ loading" } else { "" };
-        // Surface an expanded context window (default is 3) so it's not a mystery
-        // why more surrounding lines appear.
         let ctx = if self.config.context_lines > 3 {
             format!(" · ⊕{} ctx", self.config.context_lines)
         } else {
             String::new()
         };
         format!(
-            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}{ctx}{load}"
+            "{} · {} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}{ctx}{load}",
+            self.branch(),
+            self.comparison_label(),
         )
     }
 

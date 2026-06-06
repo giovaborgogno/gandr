@@ -2,9 +2,9 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 72, 20)"
 ---
-" Diff [1]   Files [2]   <repo>
-"gdiff ┌Keys──────────────────────────────────────────────────────┐hing  "
-"┌Files│ j / k, ↑ / ↓    move (tree) or scroll (diff)             │─────┐"
+" Diff   Files                                    main · uncommitted · ◉ "
+"──────┌Keys──────────────────────────────────────────────────────┐──────"
+"┌ Chan│ j / k, ↑ / ↓    move (tree) or scroll (diff)             │─────┐"
 "│  M a│ Tab             switch focus tree ↔ diff                 │     │"
 "│     │ n / p           next / previous file                     │     │"
 "│     │ ] / [           next / previous hunk                     │     │"

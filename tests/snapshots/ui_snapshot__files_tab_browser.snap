@@ -2,8 +2,8 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 90, 14)"
 ---
-" Diff [1]   Files [2]   <repo>
-"Files · browsing the whole repo (including ignored)                                       "
+" Diff   Files                                                      main · uncommitted · ◉ "
+"──────────────────────────────────────────────────────────────────────────────────────────"
 "┌Repo──────────────────────────────┐┌────────────────────────────────────────────────────┐"
 "│▾ src/                            ││Select a file to view its contents.                 │"
 "│    lib.rs                        ││                                                    │"

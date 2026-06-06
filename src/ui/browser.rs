@@ -85,7 +85,15 @@ fn syntax_spans(text: &str, fg: &[FgSpan]) -> Vec<Span<'static>> {
 }
 
 fn render_content(app: &App, f: &mut Frame, area: Rect) {
-    let block = Block::bordered().border_style(super::border_style(app.focus() == Focus::Diff));
+    // Title the pane with the selected file's path (relative to the repo root).
+    let title = app.browser().loaded().map(|l| {
+        let p = l.path.strip_prefix(&app.context().root).unwrap_or(&l.path);
+        format!(" {} ", p.display())
+    });
+    let mut block = Block::bordered().border_style(super::border_style(app.focus() == Focus::Diff));
+    if let Some(title) = &title {
+        block = block.title(title.clone());
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
     app.browser().set_content_viewport(inner.height as usize);

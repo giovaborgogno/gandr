@@ -2,9 +2,9 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 70, 14)"
 ---
-" Diff [1]   Files [2]   <repo>
-"gd┌Compare vs ref · 2 matches──────────────────────────────────────┐ w"
-"┌F│> log                                                           │─┐"
+" Diff   Files                           release-1.0 · uncommitted · ◉ "
+"──┌Compare vs ref · 2 matches──────────────────────────────────────┐──"
+"┌ │> log                                                           │─┐"
 "│ │feature/login                                           (branch)│ │"
 "│ │feature/logout                                          (branch)│ │"
 "│ │                                                                │ │"

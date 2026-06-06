@@ -2,8 +2,8 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 90, 18)"
 ---
-" Diff [1]   Files [2]   <repo>
-"Fi┌Search [files] · 2 results · Tab: switch mode───────────────────────────────────────┐  "
+" Diff   Files                                                      main · uncommitted · ◉ "
+"──┌Search [files] · 2 results · Tab: switch mode───────────────────────────────────────┐──"
 "┌R│> rs                                                                                │─┐"
 "│▸│src/lib.rs                                                                          │ │"
 "│ │src/main.rs                                                                         │ │"

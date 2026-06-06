@@ -99,9 +99,9 @@ fn border_style(focused: bool) -> Style {
     }
 }
 
-/// Draw the whole frame: tab bar, status line, body (per tab), keybar.
+/// Draw the whole frame: gitui-style header (tabs + separator), body, keybar.
 pub fn render(app: &App, f: &mut Frame) {
-    let [tabbar, status, body, keybar] = Layout::vertical([
+    let [tabs, separator, body, keybar] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
@@ -109,13 +109,13 @@ pub fn render(app: &App, f: &mut Frame) {
     ])
     .areas(f.area());
 
-    render_tabbar(app, f, tabbar);
+    render_header(app, f, tabs);
     f.render_widget(
         Paragraph::new(Span::styled(
-            status_line(app),
-            Style::default().add_modifier(Modifier::BOLD),
+            "─".repeat(separator.width as usize),
+            Style::default().fg(Color::DarkGray),
         )),
-        status,
+        separator,
     );
 
     match app.tab() {
@@ -295,58 +295,61 @@ fn result_line(selected: bool, text: String, width: usize) -> Line<'static> {
 }
 
 /// The gitui-style tab bar: `Diff [1]  Files [2]` left, repo path right.
-fn render_tabbar(app: &App, f: &mut Frame, area: Rect) {
-    let tabs = [(Tab::Diff, "Diff", '1'), (Tab::Files, "Files", '2')];
+fn render_header(app: &App, f: &mut Frame, area: Rect) {
+    // Tabs on the left.
     let mut spans = vec![Span::raw(" ")];
-    let mut tabs_w = 1usize;
-    for (tab, label, num) in tabs {
-        let active = app.tab() == tab;
-        let style = if active {
+    let mut used = 1usize;
+    for (tab, label) in [(Tab::Diff, "Diff"), (Tab::Files, "Files")] {
+        let style = if app.tab() == tab {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        let text = format!("{label} [{num}]");
-        tabs_w += text.chars().count() + 3;
-        spans.push(Span::styled(text, style));
+        spans.push(Span::styled(label, style));
         spans.push(Span::raw("   "));
+        used += label.chars().count() + 3;
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 
-    // Repo path to the right of the tabs, truncated (keeping the tail) to fit.
+    // Compact context on the right (branch · comparison + live indicators), dim.
+    let context = header_context(app);
     let w = area.width as usize;
-    if w > tabs_w + 4 {
-        let avail = w - tabs_w;
-        let root = app.context().root.to_string_lossy();
-        let mut path = format!("{root} ");
-        if path.chars().count() > avail {
-            let tail: String = path.chars().rev().take(avail - 1).collect();
-            path = format!("…{}", tail.chars().rev().collect::<String>());
-        }
-        let pad = avail.saturating_sub(path.chars().count());
+    if !context.is_empty() && w > used + 1 {
+        let avail = w - used - 1;
+        let text: String = if context.chars().count() > avail {
+            context.chars().take(avail).collect()
+        } else {
+            context
+        };
+        let pad = avail - text.chars().count();
         let right = Rect {
-            x: area.x + (tabs_w + pad) as u16,
-            width: (avail - pad) as u16,
+            x: area.x + (used + pad) as u16,
+            width: (avail - pad + 1) as u16,
             ..area
         };
         f.render_widget(
-            Paragraph::new(Span::styled(path, Style::default().fg(Color::DarkGray))),
+            Paragraph::new(Span::styled(text, Style::default().fg(Color::DarkGray))),
             right,
         );
     }
 }
 
-/// The per-tab status line.
-fn status_line(app: &App) -> String {
-    match app.tab() {
-        Tab::Diff => app.header_line(),
-        Tab::Files => match app.browser().loaded() {
-            Some(l) => format!("Files · {}", l.path.display()),
-            None => "Files · browsing the whole repo (including ignored)".to_string(),
-        },
+/// The compact right-aligned header context (counts/reviewed live in the panel
+/// titles, so the header stays uncluttered).
+fn header_context(app: &App) -> String {
+    let mut s = format!("{} · {}", app.branch(), app.comparison_label());
+    if app.context_lines() > 3 {
+        s.push_str(&format!(" · ⊕{}", app.context_lines()));
     }
+    if app.is_watching() {
+        s.push_str(" · ◉");
+    }
+    if app.is_loading() {
+        s.push_str(" · ⟳");
+    }
+    s
 }
 
 /// The keybar line (search prompt / error / per-tab hints).
@@ -475,10 +478,13 @@ fn render_picker(f: &mut Frame, area: Rect, picker: &crate::app::Picker) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The left panel: the compact file tree.
+/// The left panel: the changed-file tree, titled with the totals + reviewed count.
 fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
+    let (add, del) = app.totals();
+    let n = app.files().len();
+    let title = format!(" Changes  +{add} −{del}  {}/{n} ", app.reviewed_count());
     let block = Block::bordered()
-        .title(format!("Files ({})", app.files().len()))
+        .title(title)
         .border_style(border_style(app.focus() == Focus::Tree));
 
     let inner = block.inner(area);
