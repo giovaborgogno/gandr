@@ -287,13 +287,15 @@ fn result_line(selected: bool, text: String, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-/// The gitui-style tab bar: `Diff [1]  Files [2]` left, repo path right.
+/// The gitui-style header: tabs `Diff [1]  Repo [2]` left, branch/comparison
+/// (with a `→` to the compared-against ref) right.
 fn render_header(app: &App, f: &mut Frame, area: Rect) {
-    // Tabs on the left.
+    // Tabs on the left, each with its `[n]` switch key.
     let mut spans = vec![Span::raw(" ")];
     let mut used = 1usize;
-    for (tab, label) in [(Tab::Diff, "Diff"), (Tab::Files, "Files")] {
-        let style = if app.tab() == tab {
+    for (tab, label, num) in [(Tab::Diff, "Diff", '1'), (Tab::Files, "Repo", '2')] {
+        let active = app.tab() == tab;
+        let style = if active {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
@@ -301,8 +303,12 @@ fn render_header(app: &App, f: &mut Frame, area: Rect) {
             Style::default().fg(Color::DarkGray)
         };
         spans.push(Span::styled(label, style));
+        spans.push(Span::styled(
+            format!(" [{num}]"),
+            Style::default().fg(Color::DarkGray),
+        ));
         spans.push(Span::raw("   "));
-        used += label.chars().count() + 3;
+        used += label.chars().count() + 4 + 3; // label + " [n]" + gap
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 
@@ -332,7 +338,12 @@ fn render_header(app: &App, f: &mut Frame, area: Rect) {
 /// The compact right-aligned header context (counts/reviewed live in the panel
 /// titles, so the header stays uncluttered).
 fn header_context(app: &App) -> String {
-    let mut s = format!("{} · {}", app.branch(), app.comparison_label());
+    // When comparing against a ref, show `branch → ref` (the arrow points at what
+    // we diff against); otherwise `branch · comparison` (uncommitted, PR, …).
+    let mut s = match app.compare_against() {
+        Some(target) => format!("{} → {target}", app.branch()),
+        None => format!("{} · {}", app.branch(), app.comparison_label()),
+    };
     if app.context_lines() > 3 {
         s.push_str(&format!(" · ⊕{}", app.context_lines()));
     }

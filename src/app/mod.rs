@@ -401,6 +401,15 @@ impl App {
         self.title.clone().unwrap_or_else(|| self.spec.label())
     }
 
+    /// The ref this comparison diffs the working tree against, if any — shown in
+    /// the header as `branch → <ref>`.
+    pub fn compare_against(&self) -> Option<&str> {
+        match &self.spec {
+            CompareSpec::WorkdirVs(r) => Some(r.as_str()),
+            _ => None,
+        }
+    }
+
     /// Whether the working tree is being watched (live comparison + auto-refresh).
     pub fn is_watching(&self) -> bool {
         self.auto_refresh && self.spec.is_live()

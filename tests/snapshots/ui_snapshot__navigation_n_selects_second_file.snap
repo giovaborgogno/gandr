@@ -2,7 +2,7 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 14)"
 ---
-" Diff   Files                                            main · uncommitted · ◉ "
+" Diff [1]   Repo [2]                                     main · uncommitted · ◉ "
 "────────────────────────────────────────────────────────────────────────────────"
 "┌ Changes  +2 −2  0/2 ─────────┐┌──────────────────────────────────────────────┐"
 "│  M a.txt                     ││z.txt  +1 −1  [2/2]                           │"

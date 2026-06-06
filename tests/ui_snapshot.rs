@@ -817,6 +817,11 @@ fn ref_picker_enter_sets_comparison() {
         "header should show the new comparison: {}",
         app.header_line()
     );
+    // The rendered header shows the arrow to the compared-against ref.
+    assert!(
+        frame(&app, 90, 10).contains("→ main"),
+        "header should point at the compared ref with an arrow"
+    );
 }
 
 // ---- M5: compare picker ----
