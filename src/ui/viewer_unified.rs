@@ -77,63 +77,8 @@ pub(crate) fn line_fg<'a>(
     spans.map(Vec::as_slice).unwrap_or(&[])
 }
 
-/// Build a styled [`Line`] for one diff line, filling the background to `width`.
-/// `is_cursor` marks the current line (its gutter is reversed — "you are here").
-#[allow(clippy::too_many_arguments)]
-fn line_row(
-    line: &DiffLine,
-    w: usize,
-    width: usize,
-    fg: &[FgSpan],
-    palette: &Palette,
-    word_on: bool,
-    query: Option<&str>,
-    is_cursor: bool,
-) -> Line<'static> {
-    let (bar, bar_color, base_bg) = match line.kind {
-        LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
-        LineKind::Del => ('▌', Color::Red, Some(palette.del_bg)),
-        LineKind::Context => (' ', Color::DarkGray, None),
-    };
-
-    let gutter = format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w));
-    let gutter_style = if is_cursor {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let mut spans = vec![
-        Span::styled(gutter, gutter_style),
-        Span::styled(bar.to_string(), Style::default().fg(bar_color)),
-        Span::raw(" "),
-    ];
-
-    let text_spans = compose::line_spans(
-        &line.text,
-        line.kind,
-        &line.segments,
-        fg,
-        palette,
-        word_on,
-        query,
-    );
-    spans.extend(text_spans);
-
-    // Fill the rest of the row with the base background, delta-style.
-    if let Some(bg) = base_bg {
-        let used = w * 2 + 3 + line.text.chars().count(); // gutter + bar + space + text
-        if used < width {
-            spans.push(Span::styled(
-                " ".repeat(width - used),
-                Style::default().bg(bg),
-            ));
-        }
-    }
-    Line::from(spans)
-}
-
 /// The fixed left-margin width of a diff row: two line-number columns, a space
-/// after each, the change bar, and a trailing space.
+/// after each, the change sign, and a trailing space.
 fn prefix_width(w: usize) -> usize {
     2 * w + 4
 }
@@ -153,10 +98,10 @@ fn row_height(row: &DiffRow, full: &[DiffLine], w: usize, width: usize) -> usize
     }
 }
 
-/// Build a diff line as one-or-more wrapped terminal rows: the gutter + change
-/// bar lead the first row, continuation rows keep the bar with a blank gutter,
-/// and each row's background fills to `width` (delta-style). `is_cursor` reverses
-/// the line-number gutter on the first row ("you are here").
+/// Build a diff line as one-or-more wrapped terminal rows. The add/del
+/// background spans the *whole* row (line-number gutter included); a `+`/`-`
+/// sign leads the first row (blank on continuation rows); each row fills to
+/// `width`. `is_cursor` reverses the line-number gutter ("you are here").
 #[allow(clippy::too_many_arguments)]
 fn line_rows_wrapped(
     line: &DiffLine,
@@ -168,9 +113,9 @@ fn line_rows_wrapped(
     query: Option<&str>,
     is_cursor: bool,
 ) -> Vec<Line<'static>> {
-    let (bar, bar_color, base_bg) = match line.kind {
-        LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
-        LineKind::Del => ('▌', Color::Red, Some(palette.del_bg)),
+    let (sign, sign_color, base_bg) = match line.kind {
+        LineKind::Add => ('+', Color::Green, Some(palette.add_bg)),
+        LineKind::Del => ('-', Color::Red, Some(palette.del_bg)),
         LineKind::Context => (' ', Color::DarkGray, None),
     };
     let prefix = prefix_width(w);
@@ -186,25 +131,36 @@ fn line_rows_wrapped(
     );
     let wrapped = crate::ui::viewer_split::wrap_spans(&text_spans, text_w);
 
-    let gutter_style = if is_cursor {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().fg(Color::DarkGray)
+    // The row's base background, applied to every prefix span so the color runs
+    // edge to edge (gutter included).
+    let bg = |style: Style| match base_bg {
+        Some(c) => style.bg(c),
+        None => style,
     };
     let mut out = Vec::with_capacity(wrapped.len().max(1));
     for (k, chunk) in wrapped.iter().enumerate() {
-        let gutter = if k == 0 {
-            format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w))
+        let (gutter, sign_ch) = if k == 0 {
+            (
+                format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w)),
+                sign,
+            )
         } else {
-            " ".repeat(2 * w + 2) // continuation: blank line numbers, keep the bar
+            (" ".repeat(2 * w + 2), ' ') // continuation: blank numbers, no sign
         };
+        let mut gutter_style = bg(Style::default().fg(Color::DarkGray));
+        if is_cursor && k == 0 {
+            gutter_style = gutter_style.add_modifier(Modifier::REVERSED);
+        }
         let mut spans = vec![
             Span::styled(gutter, gutter_style),
-            Span::styled(bar.to_string(), Style::default().fg(bar_color)),
-            Span::raw(" "),
+            Span::styled(
+                sign_ch.to_string(),
+                bg(Style::default().fg(sign_color).add_modifier(Modifier::BOLD)),
+            ),
+            Span::styled(" ", bg(Style::default())),
         ];
         spans.extend(chunk.iter().cloned());
-        if let Some(bg) = base_bg {
+        if let Some(c) = base_bg {
             let used = prefix
                 + chunk
                     .iter()
@@ -213,7 +169,7 @@ fn line_rows_wrapped(
             if used < width {
                 spans.push(Span::styled(
                     " ".repeat(width - used),
-                    Style::default().bg(bg),
+                    Style::default().bg(c),
                 ));
             }
         }
@@ -225,9 +181,10 @@ fn line_rows_wrapped(
     out
 }
 
-/// Build one display row (a fold marker or a diff line) as a styled [`Line`].
+/// Build the terminal rows for one display row (a fold marker, or a diff line
+/// wrapped into one-or-more rows).
 #[allow(clippy::too_many_arguments)]
-fn build_row(
+fn display_row_lines(
     row: &DiffRow,
     full: &[DiffLine],
     w: usize,
@@ -238,23 +195,23 @@ fn build_row(
     word_on: bool,
     query: Option<&str>,
     is_cursor: bool,
-) -> Line<'static> {
+) -> Vec<Line<'static>> {
     match row {
-        DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width, is_cursor),
+        DiffRow::Fold { hidden, .. } => vec![fold_marker(*hidden, width, is_cursor)],
         // `.get` rather than `full[*idx]`: indices come from a coherent display
         // cache today, but a graceful empty row beats a panic if that ever slips.
         DiffRow::Line(idx) => match full.get(*idx) {
             Some(line) => {
                 let fg = line_fg(line, old_hl, new_hl);
-                line_row(line, w, width, fg, palette, word_on, query, is_cursor)
+                line_rows_wrapped(line, w, width, fg, palette, word_on, query, is_cursor)
             }
-            None => Line::from(""),
+            None => vec![Line::from("")],
         },
     }
 }
 
-/// Build every display row (used by tests/benches; `render` windows to the
-/// visible slice so per-frame cost stays O(viewport), not O(file)).
+/// Build every terminal row of the file's folded diff (used by tests/benches;
+/// `render` windows to the visible slice so per-frame cost stays O(viewport)).
 #[allow(clippy::too_many_arguments)]
 pub fn rows(
     full: &[DiffLine],
@@ -269,8 +226,8 @@ pub fn rows(
     let w = gutter_width(full);
     display
         .iter()
-        .map(|row| {
-            build_row(
+        .flat_map(|row| {
+            display_row_lines(
                 row, full, w, width, old_hl, new_hl, palette, word_on, query, false,
             )
         })
@@ -326,19 +283,20 @@ pub fn render(
     let mut di = top;
     while di < total && term_rows.len() < height {
         let is_cursor = focused && di == cursor;
-        match &display[di] {
-            DiffRow::Fold { hidden, .. } => term_rows.push(fold_marker(*hidden, width, is_cursor)),
-            DiffRow::Line(idx) => {
-                if let Some(line) = full.get(*idx) {
-                    let fg = line_fg(line, old_hl, new_hl);
-                    for row in
-                        line_rows_wrapped(line, w, width, fg, palette, word_on, query, is_cursor)
-                    {
-                        if term_rows.len() < height {
-                            term_rows.push(row);
-                        }
-                    }
-                }
+        for row in display_row_lines(
+            &display[di],
+            full,
+            w,
+            width,
+            old_hl,
+            new_hl,
+            palette,
+            word_on,
+            query,
+            is_cursor,
+        ) {
+            if term_rows.len() < height {
+                term_rows.push(row);
             }
         }
         di += 1;
