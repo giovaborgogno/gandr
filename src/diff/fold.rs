@@ -60,17 +60,27 @@ pub fn fold(full: &[Line], context: usize, expanded: &HashMap<usize, usize>) -> 
         }
         let len = i - start;
         let revealed = expanded.get(&start).copied().unwrap_or(0).min(len);
-        // Reveal `revealed` lines from the top of the run.
-        out.extend((start..start + revealed).map(DiffRow::Line));
         let remaining = len - revealed;
         if remaining < MIN_FOLD {
-            // Show the (tiny) remainder inline rather than leaving a stub fold.
-            out.extend((start + revealed..i).map(DiffRow::Line));
-        } else {
+            // Fully (or nearly) revealed — show the whole run inline.
+            out.extend((start..i).map(DiffRow::Line));
+        } else if i == n {
+            // Trailing gap (no change below) → reveal from the top, fold last,
+            // so revealed context continues down from the change above.
+            out.extend((start..start + revealed).map(DiffRow::Line));
             out.push(DiffRow::Fold {
                 anchor: start,
                 hidden: remaining,
             });
+        } else {
+            // A change follows → reveal from the BOTTOM (the lines adjacent to
+            // that change), with the fold above them. So expanding a gap reveals
+            // context leading into the change you're looking at, not the far top.
+            out.push(DiffRow::Fold {
+                anchor: start,
+                hidden: remaining,
+            });
+            out.extend((i - revealed..i).map(DiffRow::Line));
         }
     }
     out
@@ -136,26 +146,31 @@ mod tests {
     }
 
     #[test]
-    fn incremental_reveal_from_the_top() {
+    fn leading_gap_reveals_from_the_bottom_toward_the_change() {
         let full = sample();
-        // Reveal 3 of the leading fold's 7 hidden lines.
+        // The leading gap [0,7) precedes the change → revealing 3 shows the lines
+        // nearest the change (4,5,6) with the fold above them.
         let expanded = HashMap::from([(0usize, 3usize)]);
         let rows = fold(&full, 3, &expanded);
-        // Lines 0,1,2 now shown, then a smaller Fold for the remaining 4.
-        assert_eq!(rows[0], DiffRow::Line(0));
-        assert_eq!(rows[1], DiffRow::Line(1));
-        assert_eq!(rows[2], DiffRow::Line(2));
         assert_eq!(
-            rows[3],
+            rows[0],
             DiffRow::Fold {
                 anchor: 0,
                 hidden: 4
             }
         );
-        // The trailing fold is untouched.
+        assert_eq!(rows[1], DiffRow::Line(4));
+        assert_eq!(rows[2], DiffRow::Line(5));
+        assert_eq!(rows[3], DiffRow::Line(6));
+        // The trailing fold (no change below) reveals from the top instead.
+        let expanded = HashMap::from([(14usize, 2usize)]);
+        let rows = fold(&full, 3, &expanded);
+        // ...lines 14,15 shown, then the fold for the rest.
+        assert!(rows.contains(&DiffRow::Line(14)));
+        assert!(rows.contains(&DiffRow::Line(15)));
         assert!(rows.contains(&DiffRow::Fold {
             anchor: 14,
-            hidden: 6
+            hidden: 4
         }));
     }
 
