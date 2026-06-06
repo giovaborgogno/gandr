@@ -105,7 +105,7 @@ impl SmartCase {
 
 /// A walk that respects `.gitignore` and skips hidden entries (incl. `.git`),
 /// even when `root` isn't itself a git repo (`require_git(false)`) — so search
-/// behaves the same whether gdiff is pointed at a repo or a subdirectory.
+/// behaves the same whether gandr is pointed at a repo or a subdirectory.
 ///
 /// Note: this is intentionally stricter than the Files-tab browser, which lists
 /// git-ignored and hidden files too. Search is ripgrep-style — skipping ignored

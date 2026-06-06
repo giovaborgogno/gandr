@@ -1,10 +1,19 @@
 [package]
-name = "gdiff"
+name = "gandr"
 version = "0.1.0"
 edition = "2021"
 description = "A read-only TUI for reviewing git diffs — delta-style highlighting, GitHub-like side-by-side, built for reviewing AI coding-agent changes."
+authors = ["Giovanni Borgogno <giovaborgogno@gmail.com>"]
 license = "MIT OR Apache-2.0"
-publish = false           # flip when we decide to release (see PLAN.md "pre-publish")
+readme = "README.md"
+# TODO(pre-publish): confirm this matches your actual GitHub repo before `cargo publish`.
+repository = "https://github.com/giovaborgogno/gandr"
+homepage = "https://github.com/giovaborgogno/gandr"
+keywords = ["git", "diff", "tui", "review", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+# Keep the published crate lean: ship the source, drop agent/dev-only material.
+exclude = [".claude/", "docs/", "*.html", "AGENTS.md", "CLAUDE.md", "PLAN.md", "DESIGN.md"]
+publish = true
 
 [dependencies]
 # TUI
@@ -34,7 +43,7 @@ crossbeam-channel = "0.5"
 # Errors
 anyhow = "1"
 
-# Review-state persistence (.git/gdiff/state.json)
+# Review-state persistence (.git/gandr/state.json)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

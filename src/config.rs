@@ -1,5 +1,5 @@
 //! Configuration. For M0 this is just in-memory defaults; loading from
-//! `~/.config/gdiff/config.toml` + per-repo `.gdiff.toml` lands in M7.
+//! `~/.config/gandr/config.toml` + per-repo `.gandr.toml` lands in M7.
 
 /// How the diff is laid out in the viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

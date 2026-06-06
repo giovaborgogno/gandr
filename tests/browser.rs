@@ -1,6 +1,6 @@
 //! Unit tests for the repo file browser (Files tab).
 
-use gdiff::browser::{Browser, EntryKind};
+use gandr::browser::{Browser, EntryKind};
 use std::fs;
 
 #[test]
@@ -79,7 +79,7 @@ fn content_highlighting_is_multiline_aware() {
     );
 
     // Changing theme drops the highlights so they're recomputed for the new mode.
-    browser.set_mode(gdiff::highlight::ThemeMode::Light);
+    browser.set_mode(gandr::highlight::ThemeMode::Light);
     assert!(browser.loaded().unwrap().highlights.is_empty());
     warm(&mut browser);
     assert_eq!(
@@ -93,7 +93,7 @@ fn content_highlighting_is_multiline_aware() {
 fn warm(browser: &mut Browser) {
     if let Some((path, lines)) = browser.highlight_target() {
         let spans =
-            gdiff::highlight::Highlighter::for_path(&path, browser.mode()).highlight_file(&lines);
+            gandr::highlight::Highlighter::for_path(&path, browser.mode()).highlight_file(&lines);
         browser.apply_highlights(&path, spans);
     }
 }

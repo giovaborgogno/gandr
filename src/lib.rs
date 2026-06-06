@@ -1,4 +1,4 @@
-//! gdiff — a read-only TUI for reviewing git diffs.
+//! gandr — a read-only TUI for reviewing git diffs.
 //!
 //! Layered, one-directional dependencies (see `docs/architecture.md`):
 //! `app` → `ui`/`highlight` → `diff` → `git` (the `GitBackend` trait).

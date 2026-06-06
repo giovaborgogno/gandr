@@ -1,11 +1,11 @@
 ---
 name: next-milestone
-description: Pick the next unchecked milestone in PLAN.md, implement it end-to-end, make it pass the Definition-of-done gate, tick the boxes, and commit to main. Use when asked to "continue gdiff", "do the next milestone", "keep building", or work the roadmap.
+description: Pick the next unchecked milestone in PLAN.md, implement it end-to-end, make it pass the Definition-of-done gate, tick the boxes, and commit to main. Use when asked to "continue gandr", "do the next milestone", "keep building", or work the roadmap.
 ---
 
 # next-milestone
 
-Drives gdiff development one milestone at a time, autonomously, following the repo's rules.
+Drives gandr development one milestone at a time, autonomously, following the repo's rules.
 
 ## Steps
 

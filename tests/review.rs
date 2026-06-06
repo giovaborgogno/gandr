@@ -1,8 +1,8 @@
 //! Unit tests for review state: transitions, changed-since, persistence, hashing.
 
-use gdiff::diff::{FileDiff, Hunk, Line, LineKind};
-use gdiff::git::{FileChange, Status};
-use gdiff::review::{diff_hash, ReviewState, ReviewStatus};
+use gandr::diff::{FileDiff, Hunk, Line, LineKind};
+use gandr::git::{FileChange, Status};
+use gandr::review::{diff_hash, ReviewState, ReviewStatus};
 use std::path::Path;
 
 fn file_diff(path: &str, text: &str) -> FileDiff {
@@ -66,7 +66,7 @@ fn keys_are_independent() {
 #[test]
 fn persistence_round_trip() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("gdiff").join("state.json");
+    let path = dir.path().join("gandr").join("state.json");
 
     let mut st = ReviewState::default();
     st.toggle("k", Path::new("a.rs"), 42);
@@ -85,7 +85,7 @@ fn persistence_round_trip() {
 
 #[test]
 fn load_missing_file_is_empty() {
-    let st = ReviewState::load(Path::new("/nonexistent/gdiff/state.json"));
+    let st = ReviewState::load(Path::new("/nonexistent/gandr/state.json"));
     assert_eq!(
         st.status("k", Path::new("a.rs"), 1),
         ReviewStatus::Unreviewed

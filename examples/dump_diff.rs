@@ -4,10 +4,10 @@
 //! uncommitted diff in a git-like form. A debugging aid for the diff engine (M1).
 
 use anyhow::Result;
-use gdiff::diff::{engine, LineKind};
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::CompareSpec;
-use gdiff::testutil::Fixture;
+use gandr::diff::{engine, LineKind};
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::CompareSpec;
+use gandr::testutil::Fixture;
 
 fn main() -> Result<()> {
     let fx = Fixture::new();

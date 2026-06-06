@@ -1,11 +1,11 @@
-# gdiff — Design Spec
+# gandr — Design Spec
 
 > Status: **locked** for v1. Changes require an ADR in `docs/decisions/` and an update here.
-> This is the source of truth for *what* gdiff is. `PLAN.md` tracks *how/when* it gets built.
+> This is the source of truth for *what* gandr is. `PLAN.md` tracks *how/when* it gets built.
 
 ## 1. Purpose
 
-`gdiff` is a **read-only** terminal UI (ratatui) for reviewing git diffs. It never
+`gandr` is a **read-only** terminal UI (ratatui) for reviewing git diffs. It never
 mutates the repository. It is optimized for one workflow:
 
 > *I am working with an AI coding agent (e.g. Claude Code). I want to watch the
@@ -18,24 +18,24 @@ viewer, not a git client.
 ## 2. CLI
 
 ```
-gdiff                  # default: ALL uncommitted vs HEAD (staged + unstaged together)
-gdiff <ref>            # working tree vs <ref>            e.g. gdiff main
-gdiff <ref>..<ref>     # commit range
-gdiff --staged         # index vs HEAD
-gdiff --pr [N]         # PR via gh (current branch's PR if N omitted)
-gdiff --smart          # enable smart auto-selection for this run
-gdiff <path>           # scope the comparison to a path
+gandr                  # default: ALL uncommitted vs HEAD (staged + unstaged together)
+gandr <ref>            # working tree vs <ref>            e.g. gandr main
+gandr <ref>..<ref>     # commit range
+gandr --staged         # index vs HEAD
+gandr --pr [N]         # PR via gh (current branch's PR if N omitted)
+gandr --smart          # enable smart auto-selection for this run
+gandr <path>           # scope the comparison to a path
 ```
 
 **Smart selection is opt-in only** (`--smart` or `smart_compare = true`). When enabled
 and there are no uncommitted changes, it falls back: branch-vs-base (merge-base with the
-first matching `base_branches` entry) → PR. The bare `gdiff` default is always the plain
+first matching `base_branches` entry) → PR. The bare `gandr` default is always the plain
 uncommitted diff.
 
 ## 3. Layout
 
 ```
-┌─ gdiff · feature/x → main · 5 files  +120 −34 ───────────────── ◉ watching ─┐
+┌─ gandr · feature/x → main · 5 files  +120 −34 ───────────────── ◉ watching ─┐
 ├───────────────┬──────────────────────────────────────────────────────────────┤
 │ Files (5)     │ src/app.rs                                  +12 −4   [2/5] ✓   │
 │               │                                                                │
@@ -98,17 +98,17 @@ Mouse: wheel scroll + click to select a file.
 - **Watch / auto-refresh** (notify + debounce): enabled for working-tree comparisons;
   disabled for static comparisons (ranges, single commits, PRs). On refresh it preserves
   scroll position and the selected file. A subtle "updated" flash signals a refresh.
-- **Review state**: persisted in `.git/gdiff/state.json`, keyed by comparison spec.
+- **Review state**: persisted in `.git/gandr/state.json`, keyed by comparison spec.
   When a reviewed file changes (e.g. the agent edits it again), keep the `✓` **and** show
   a `⚠ changed since reviewed` badge — never silently lose progress, never hide new changes.
 - **Empty state**: "No uncommitted changes. Press `c` to compare against a branch, or run
   with `--smart`."
-- **Read-only**: gdiff never writes to the working tree, index, or refs.
+- **Read-only**: gandr never writes to the working tree, index, or refs.
 
 ## 7. Theme — `theme = "auto"` (default)
 
 What matters is the **terminal background**, not the OS setting (terminals may differ from
-the system theme, or run over SSH). At startup (before entering the alt-screen) gdiff queries
+the system theme, or run over SSH). At startup (before entering the alt-screen) gandr queries
 the terminal background via **OSC 11** (`termbg`), falling back to `COLORFGBG`, then to dark.
 
 - dark → dark syntect theme + dark diff palette (dim red/green backgrounds)
@@ -122,7 +122,7 @@ A specific theme name disables detection.
 
 ## 8. Config
 
-`~/.config/gdiff/config.toml`, overridable per-repo by `.gdiff.toml`.
+`~/.config/gandr/config.toml`, overridable per-repo by `.gandr.toml`.
 
 ```toml
 default_view  = "unified"        # | "side-by-side"

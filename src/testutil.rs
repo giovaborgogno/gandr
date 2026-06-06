@@ -34,9 +34,9 @@ impl Fixture {
         let repo = git2::Repository::init_opts(dir.path(), &opts).expect("git init");
         {
             let mut cfg = repo.config().expect("repo config");
-            cfg.set_str("user.name", "gdiff fixtures")
+            cfg.set_str("user.name", "gandr fixtures")
                 .expect("set name");
-            cfg.set_str("user.email", "fixtures@gdiff.test")
+            cfg.set_str("user.email", "fixtures@gandr.test")
                 .expect("set email");
         }
         Self { dir, repo }

@@ -1,27 +1,27 @@
 //! Unit/integration tests for the diff engine against deterministic fixtures.
 //! No TUI — this validates that we produce correct hunks before rendering them.
 
-use gdiff::diff::engine;
-use gdiff::diff::LineKind;
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::{CompareSpec, GitBackend, Status};
-use gdiff::testutil::Fixture;
+use gandr::diff::engine;
+use gandr::diff::LineKind;
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::{CompareSpec, GitBackend, Status};
+use gandr::testutil::Fixture;
 use std::path::Path;
 
 const CTX: usize = 3;
 
 /// Build the uncommitted diffs for a fixture.
-fn diffs(fx: &Fixture) -> Vec<gdiff::diff::FileDiff> {
+fn diffs(fx: &Fixture) -> Vec<gandr::diff::FileDiff> {
     diffs_spec(fx, &CompareSpec::Uncommitted)
 }
 
 /// Build the diffs for a fixture under an arbitrary comparison.
-fn diffs_spec(fx: &Fixture, spec: &CompareSpec) -> Vec<gdiff::diff::FileDiff> {
+fn diffs_spec(fx: &Fixture, spec: &CompareSpec) -> Vec<gandr::diff::FileDiff> {
     let backend = Git2Backend::open(fx.path()).unwrap();
     engine::build_diffs(&backend, spec, CTX).unwrap()
 }
 
-fn texts(lines: &[gdiff::diff::Line], kind: LineKind) -> Vec<String> {
+fn texts(lines: &[gandr::diff::Line], kind: LineKind) -> Vec<String> {
     lines
         .iter()
         .filter(|l| l.kind == kind)

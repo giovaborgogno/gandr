@@ -1,12 +1,12 @@
-//! Micro-benchmarks for gdiff's hot paths. Run with `cargo run --release --example bench`.
+//! Micro-benchmarks for gandr's hot paths. Run with `cargo run --release --example bench`.
 
-use gdiff::diff::fold;
-use gdiff::diff::{engine, FileDiff};
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::CompareSpec;
-use gdiff::highlight::{Highlighter, Palette, ThemeMode};
-use gdiff::testutil::Fixture;
-use gdiff::{browser::Browser, ui::viewer_unified};
+use gandr::diff::fold;
+use gandr::diff::{engine, FileDiff};
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::CompareSpec;
+use gandr::highlight::{Highlighter, Palette, ThemeMode};
+use gandr::testutil::Fixture;
+use gandr::{browser::Browser, ui::viewer_unified};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -108,17 +108,17 @@ fn main() {
     });
 
     // 6) Diff-tree row building for a big changeset (rebuilt while navigating).
-    let many: Vec<gdiff::diff::FileDiff> = (0..1000)
+    let many: Vec<gandr::diff::FileDiff> = (0..1000)
         .map(|i| make_file(&format!("crate{}/src/mod{i}/file{i}.rs", i % 20)))
         .collect();
     let collapsed = std::collections::HashSet::new();
     let trows = bench("tree::build_rows: 1000-file changeset", || {
-        gdiff::ui::tree::build_rows(&many, &collapsed)
+        gandr::ui::tree::build_rows(&many, &collapsed)
     });
     println!("    └ {} tree rows", trows.len());
 
-    // 7) Real-repo navigation costs (set GDIFF_BENCH_REPO=/path/to/big/checkout).
-    if let Ok(repo) = std::env::var("GDIFF_BENCH_REPO") {
+    // 7) Real-repo navigation costs (set GANDR_BENCH_REPO=/path/to/big/checkout).
+    if let Ok(repo) = std::env::var("GANDR_BENCH_REPO") {
         let root = std::path::PathBuf::from(&repo);
         println!("-- real repo: {repo} --");
         // The per-cursor-move cost in the Repo browser is read + highlight.
@@ -142,14 +142,14 @@ fn main() {
             });
         }
     } else {
-        println!("(set GDIFF_BENCH_REPO to measure on a real checkout)");
+        println!("(set GANDR_BENCH_REPO to measure on a real checkout)");
     }
 }
 
 /// A trivial one-hunk FileDiff at `path`, for tree-building benchmarks.
-fn make_file(path: &str) -> gdiff::diff::FileDiff {
-    use gdiff::diff::engine::build_file_diff;
-    use gdiff::git::{FileChange, Status};
+fn make_file(path: &str) -> gandr::diff::FileDiff {
+    use gandr::diff::engine::build_file_diff;
+    use gandr::git::{FileChange, Status};
     let change = FileChange {
         path: std::path::PathBuf::from(path),
         old_path: None,

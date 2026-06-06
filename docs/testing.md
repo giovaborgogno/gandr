@@ -11,7 +11,7 @@ Diff engine, tree building, base detection, config merge, search matching. Plain
 `#[test]` table tests. No git, no terminal.
 
 ### 2. Fixtures (`testutil`)
-Deterministic temp git repos built with `git2` + `tempfile`. Never test against gdiff's own
+Deterministic temp git repos built with `git2` + `tempfile`. Never test against gandr's own
 working tree (it changes). A fixture helper looks like:
 
 ```rust
@@ -68,12 +68,12 @@ colors. For a faithful, colored image of a frame (useful to confirm the
 delta-style backgrounds / word-level / syntax highlighting actually look right):
 
 ```bash
-cargo run --example html_render -- /tmp/gdiff.html         # unified
-cargo run --example html_render -- /tmp/gdiff.html split   # side-by-side
+cargo run --example html_render -- /tmp/gandr.html         # unified
+cargo run --example html_render -- /tmp/gandr.html split   # side-by-side
 # then render the HTML to PNG headlessly (no extension needed):
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --headless=new --disable-gpu --force-device-scale-factor=2 \
-  --screenshot=/tmp/gdiff.png --window-size=1120,520 file:///tmp/gdiff.html
+  --screenshot=/tmp/gandr.png --window-size=1120,520 file:///tmp/gandr.html
 ```
 
 `examples/html_render.rs` dumps the rendered `TestBackend` buffer to HTML with

@@ -1,12 +1,12 @@
 ---
 name: new-fixture
-description: Scaffold a deterministic temp git repo fixture for testing gdiff (a known set of changes — modify, add, delete, rename, binary, multi-hunk). Use when writing tests that need a repo with specific diffs.
+description: Scaffold a deterministic temp git repo fixture for testing gandr (a known set of changes — modify, add, delete, rename, binary, multi-hunk). Use when writing tests that need a repo with specific diffs.
 ---
 
 # new-fixture
 
 Fixtures are small, deterministic git repos built at test time with `git2` + `tempfile`, so
-tests never depend on gdiff's own (changing) working tree.
+tests never depend on gandr's own (changing) working tree.
 
 ## Use the `testutil` helper
 

@@ -1,4 +1,4 @@
-# gdiff — Implementation Plan
+# gandr — Implementation Plan
 
 > The live roadmap. Agents pick the **next unchecked milestone**, implement it, make it
 > green (see "Definition of done"), tick the boxes, and commit. One commit per milestone,
@@ -119,11 +119,11 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] `--pr [N]` via `gh pr view` (tsv, title-last so tabs are safe); header shows PR title.
 - [x] CLI parsing (`<ref>`, `<ref>..<ref>`, `--staged`, `--pr`, `--smart`); Ctrl-C quits.
 - [x] Tests: cli parsing, all backend comparison kinds, detect_base, picker overlay snapshot.
-- Note: path scoping (`gdiff <path>`) deferred (ref/path disambiguation) — see backlog.
+- Note: path scoping (`gandr <path>`) deferred (ref/path disambiguation) — see backlog.
 
 ### M6 — Live watch + review state ✅
 - [x] notify + debouncer auto-refresh (working-tree comparisons), preserving selection + scroll.
-- [x] Review state persisted to `.git/gdiff/state.json` (serde_json), keyed by comparison.
+- [x] Review state persisted to `.git/gandr/state.json` (serde_json), keyed by comparison.
 - [x] Changed-since-reviewed `⚠` badge (content-hash); `✓` reviewed; `N/M reviewed` in header.
 - [x] `Space` review, `a` toggles auto-refresh, `r` manual refresh; `◉ watching` indicator.
 - [x] Review status cached (recomputed on refresh/toggle/spec-change, not per frame).
@@ -197,7 +197,7 @@ Each milestone is independently runnable and ends in a commit. After each, run t
   *retention*, but `git2_backend` still reads each blob/file fully into memory
   before the cap applies; check `blob.size()` / `metadata` first to avoid even
   the transient allocation for a single enormous file.
-- **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,
+- **Config-file loading** (`~/.config/gandr/config.toml` + per-repo `.gandr.toml`,
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.
 - **Copy** (`y`) path/selection to clipboard (needs `arboard` or OSC 52).
@@ -222,6 +222,12 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ## Pre-publish (before flipping `publish` / open-sourcing)
 
-- [ ] Decide license (Cargo.toml currently declares `MIT OR Apache-2.0`); add `LICENSE-MIT` + `LICENSE-APACHE`.
-- [ ] Consider renaming the repo directory `difftui/` → `gdiff/` to match the crate.
-- [ ] Polish README (install, usage, screenshot/asciinema), add crates.io metadata, set `publish = true`.
+- [x] **Renamed `gdiff` → `gandr`** (crate, binary, docs, review-state dir `.git/gandr/`).
+- [x] License: `MIT OR Apache-2.0`; added `LICENSE-MIT` + `LICENSE-APACHE`.
+- [x] crates.io metadata (authors, repository, keywords, categories, readme, `exclude`); `publish = true`.
+- [x] Polished README (features for both tabs, key reference, install).
+- [ ] **Confirm the GitHub repo URL** in `Cargo.toml` (`repository`/`homepage` currently
+      assume `github.com/giovaborgogno/gandr`) and push the repo there.
+- [ ] Rename the working directory `difftui/` → `gandr/` to match the crate (manual; left to you).
+- [ ] Add a screenshot / asciinema to the README.
+- [ ] `git tag v0.1.0` and `cargo publish` (run by you — not automated).

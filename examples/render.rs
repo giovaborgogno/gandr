@@ -1,14 +1,14 @@
-//! Render a single gdiff frame to stdout as text, for headless inspection.
+//! Render a single gandr frame to stdout as text, for headless inspection.
 //!
 //! `cargo run --example render` — the agent's "eyes" on the UI without a terminal.
 //! Builds a small fixture repo, computes its diff, and renders one frame.
 
 use anyhow::Result;
-use gdiff::app::App;
-use gdiff::config::Config;
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::CompareSpec;
-use gdiff::testutil::Fixture;
+use gandr::app::App;
+use gandr::config::Config;
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::CompareSpec;
+use gandr::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 

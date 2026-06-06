@@ -1,15 +1,15 @@
-//! Render a gdiff frame to an HTML file with real cell colors, so the UI can be
+//! Render a gandr frame to an HTML file with real cell colors, so the UI can be
 //! screenshotted faithfully (the TUI is otherwise only inspectable as text).
 //!
-//! `cargo run --example html_render -- <out.html>` (defaults to gdiff.html).
+//! `cargo run --example html_render -- <out.html>` (defaults to gandr.html).
 
 use anyhow::Result;
-use gdiff::app::App;
-use gdiff::config::Config;
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::CompareSpec;
-use gdiff::highlight::ThemeMode;
-use gdiff::testutil::Fixture;
+use gandr::app::App;
+use gandr::config::Config;
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::CompareSpec;
+use gandr::highlight::ThemeMode;
+use gandr::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
@@ -38,7 +38,7 @@ fn esc(s: &str) -> String {
 fn main() -> Result<()> {
     let out = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "gdiff.html".into());
+        .unwrap_or_else(|| "gandr.html".into());
 
     // A representative scenario: a modified Rust file in a dir (tree compaction),
     // a README change (word-level), and a new file.
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         "src/app/main.rs",
         "fn main() {\n    let greeting = \"hello\";\n    println!(\"{greeting}\");\n}\n",
     );
-    fx.write("README.md", "# gdiff\n\nA diff viewer for the terminal.\n");
+    fx.write("README.md", "# gandr\n\nA diff viewer for the terminal.\n");
     fx.commit("init");
     fx.write(
         "src/app/main.rs",
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     );
     fx.write(
         "README.md",
-        "# gdiff\n\nA delta-style diff viewer for the terminal.\n",
+        "# gandr\n\nA delta-style diff viewer for the terminal.\n",
     );
     fx.write("notes.txt", "todo: ship it\n");
 
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
         app.handle_key(key('n')); // → next file (README.md)
         app.handle_key(key(' ')); // review it too
                                   // Now change README on disk and refresh → it becomes "changed since reviewed".
-        fx.write("README.md", "# gdiff\n\nA fast delta-style diff viewer.\n");
+        fx.write("README.md", "# gandr\n\nA fast delta-style diff viewer.\n");
         app.refresh();
     }
     if has("search") {
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
         }
         // No run_loop here: drive the queued async search to completion by hand.
         if let Some((epoch, query, mode)) = app.take_pending_search() {
-            app.apply_search_result(epoch, gdiff::search::run(&root, &query, mode));
+            app.apply_search_result(epoch, gandr::search::run(&root, &query, mode));
         }
     }
     if has("filesview") {
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
         app.handle_key(key('j'));
         // Drive the async preview highlight to completion for the screenshot.
         if let Some((epoch, path, lines, mode)) = app.take_pending_browser_highlight() {
-            let hl = gdiff::highlight::Highlighter::for_path(&path, mode);
+            let hl = gandr::highlight::Highlighter::for_path(&path, mode);
             app.apply_browser_highlight(epoch, path, hl.highlight_file(&lines));
         }
     }
@@ -214,7 +214,7 @@ fn main() -> Result<()> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(d)
     };
-    let (w, h) = (env_u16("GDIFF_COLS", 110), env_u16("GDIFF_ROWS", 30));
+    let (w, h) = (env_u16("GANDR_COLS", 110), env_u16("GANDR_ROWS", 30));
     let mut terminal = Terminal::new(TestBackend::new(w, h))?;
     let completed = terminal.draw(|f| app.render(f))?;
     let buf = completed.buffer;

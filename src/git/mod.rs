@@ -10,7 +10,7 @@ use std::path::PathBuf;
 pub mod base;
 pub mod git2_backend;
 
-/// What to compare. The bare `gdiff` default is [`CompareSpec::Uncommitted`].
+/// What to compare. The bare `gandr` default is [`CompareSpec::Uncommitted`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompareSpec {
     /// All uncommitted changes (staged + unstaged) vs `HEAD`.
@@ -92,7 +92,7 @@ pub struct RepoContext {
     pub root: PathBuf,
     /// The repository's git directory (libgit2's resolved path — the real one
     /// for worktrees/submodules, where `<root>/.git` is a file, not a dir). This
-    /// is where gdiff persists its review state.
+    /// is where gandr persists its review state.
     pub git_dir: PathBuf,
     pub branch: Option<String>,
 }

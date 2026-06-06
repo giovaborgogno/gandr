@@ -1,8 +1,8 @@
 //! Unit tests for the file-tree builder (compaction, collapse, ordering).
 
-use gdiff::diff::FileDiff;
-use gdiff::git::{FileChange, Status};
-use gdiff::ui::tree::{build_rows, RowKind};
+use gandr::diff::FileDiff;
+use gandr::git::{FileChange, Status};
+use gandr::ui::tree::{build_rows, RowKind};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -22,7 +22,7 @@ fn file(path: &str) -> FileDiff {
     }
 }
 
-fn labels(rows: &[gdiff::ui::tree::Row]) -> Vec<String> {
+fn labels(rows: &[gandr::ui::tree::Row]) -> Vec<String> {
     rows.iter().map(|r| r.label.clone()).collect()
 }
 

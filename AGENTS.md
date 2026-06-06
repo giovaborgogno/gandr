@@ -1,11 +1,11 @@
-# AGENTS.md — gdiff
+# AGENTS.md — gandr
 
 Guide for AI coding agents (Claude Code & others) working in this repo. Humans: see `README.md`.
 `CLAUDE.md` is a symlink to this file.
 
 ## What this project is
 
-`gdiff` is a **read-only** TUI (ratatui) for reviewing git diffs — delta-style rendering,
+`gandr` is a **read-only** TUI (ratatui) for reviewing git diffs — delta-style rendering,
 GitHub-like side-by-side, built for reviewing AI-coding-agent changes. Read `DESIGN.md`
 (what we're building — **locked**) and `PLAN.md` (the milestone roadmap + current status)
 before doing anything. Architecture lives in `docs/architecture.md`; the *why* behind key
@@ -18,8 +18,8 @@ choices is in `docs/decisions/`.
    `cargo run --example render`. See `docs/testing.md`. This is the #1 rule.
 2. **The UI never touches git2 directly.** All git access goes through the `GitBackend`
    trait (`src/git/mod.rs`). Diff/UI code depends on the trait + DTOs, never on `git2::*`.
-3. **Read-only.** gdiff must never mutate the working tree, index, or refs. No staging,
-   committing, or writing files in the target repo (review state under `.git/gdiff/` is the
+3. **Read-only.** gandr must never mutate the working tree, index, or refs. No staging,
+   committing, or writing files in the target repo (review state under `.git/gandr/` is the
    only exception).
 4. **English everywhere** — code, comments, UI strings, docs, commit messages.
 5. **No `unwrap`/`expect`/`panic!` in app/runtime code.** Use `anyhow::Result` and `?`.
@@ -64,7 +64,7 @@ To verify behavior, do one of:
 
 - **Unit**: diff engine, base detection, config, tree-building — pure functions, table tests.
 - **Fixtures**: `testutil` builds temp git repos with known changes (`tempfile` + `git2`).
-  Never test against the gdiff repo's own working tree (non-deterministic).
+  Never test against the gandr repo's own working tree (non-deterministic).
 - **Snapshot/e2e**: drive `App` with key-event sequences → render → `insta` golden.
   This is our deterministic "e2e" — no pty required.
 - A change to rendering output should update snapshots **intentionally** (`cargo insta
@@ -88,7 +88,7 @@ runs fmt/clippy/test and cannot run it.)
 ## Workflow (git)
 
 - **Commit directly to `main`, one commit per milestone** (or per coherent sub-task).
-  No PRs for gdiff's own development (see ADR 0005).
+  No PRs for gandr's own development (see ADR 0005).
 - **Run `/code-review` before every commit** and act on its findings (see "Definition of done").
 - Conventional commits: `feat(ui): …`, `fix(diff): …`, `test:`, `docs:`, `chore:`, `refactor:`.
 - Update `PLAN.md` (tick boxes) in the same commit as the work it tracks.

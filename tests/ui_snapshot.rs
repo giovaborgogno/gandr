@@ -1,12 +1,12 @@
 //! Snapshot tests: drive the real `App`, render to `TestBackend`, golden the frame.
-//! This is gdiff's deterministic headless "e2e" (see docs/testing.md).
+//! This is gandr's deterministic headless "e2e" (see docs/testing.md).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use gdiff::app::App;
-use gdiff::config::Config;
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::CompareSpec;
-use gdiff::testutil::Fixture;
+use gandr::app::App;
+use gandr::config::Config;
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::CompareSpec;
+use gandr::testutil::Fixture;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;
@@ -225,7 +225,7 @@ fn reviewing_a_file_shows_check_in_tree() {
 
 #[test]
 fn changed_after_review_is_flagged() {
-    use gdiff::review::ReviewStatus;
+    use gandr::review::ReviewStatus;
     let fx = Fixture::new();
     fx.write("a.txt", "x\n");
     fx.commit("init");
@@ -355,7 +355,7 @@ fn overlays_on_tiny_terminal_do_not_panic() {
 
 #[test]
 fn light_theme_uses_light_backgrounds() {
-    use gdiff::highlight::ThemeMode;
+    use gandr::highlight::ThemeMode;
     let fx = Fixture::new();
     fx.write("a.txt", "x\n");
     fx.commit("init");
@@ -424,7 +424,7 @@ fn files_tab_browser() {
 /// the event loop performs (see `async_refresh_ignores_stale_results`).
 fn run_pending_search(app: &mut App, root: &std::path::Path) {
     if let Some((epoch, query, mode)) = app.take_pending_search() {
-        let results = gdiff::search::run(root, &query, mode);
+        let results = gandr::search::run(root, &query, mode);
         app.apply_search_result(epoch, results);
     }
 }
@@ -530,9 +530,9 @@ fn files_content_search_keeps_query_and_navigates() {
 /// flow the event loop performs on selection.
 fn warm_highlight(app: &mut App) {
     if let Some((epoch, path, old, new, mode)) = app.take_pending_highlight() {
-        let hl = gdiff::highlight::Highlighter::for_path(&path, mode);
-        let o = hl.highlight_file(&gdiff::diff::engine::split_lines(&old));
-        let n = hl.highlight_file(&gdiff::diff::engine::split_lines(&new));
+        let hl = gandr::highlight::Highlighter::for_path(&path, mode);
+        let o = hl.highlight_file(&gandr::diff::engine::split_lines(&old));
+        let n = hl.highlight_file(&gandr::diff::engine::split_lines(&new));
         app.apply_highlight(epoch, path, mode, o, n);
     }
 }
@@ -720,7 +720,7 @@ fn diff_shows_fold_marker_and_enter_expands_it() {
         folded < fulllen,
         "context should be folded ({folded} rows < {fulllen} lines)"
     );
-    use gdiff::diff::fold::DiffRow;
+    use gandr::diff::fold::DiffRow;
     let line_rows = |a: &App| {
         a.display_rows()
             .iter()

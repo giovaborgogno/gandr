@@ -1,6 +1,6 @@
 ---
 name: verify-tui
-description: Render the gdiff TUI to plain text so you can inspect it without a real terminal. Use whenever you need to "see" the UI, check layout/rendering, or verify a UI change — instead of (uselessly) trying to run the interactive TUI.
+description: Render the gandr TUI to plain text so you can inspect it without a real terminal. Use whenever you need to "see" the UI, check layout/rendering, or verify a UI change — instead of (uselessly) trying to run the interactive TUI.
 ---
 
 # verify-tui
@@ -34,5 +34,5 @@ Extend it with new scenarios as the UI grows.
 - Never report a UI change as working without having rendered it via A or B.
 - For color/style regressions, snapshot a representation that includes cell fg/bg, not just
   glyphs.
-- Build fixtures with `testutil`; never render against gdiff's own working tree (it changes,
+- Build fixtures with `testutil`; never render against gandr's own working tree (it changes,
   so output isn't deterministic).

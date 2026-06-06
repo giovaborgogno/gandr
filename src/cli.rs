@@ -2,14 +2,14 @@
 //!
 //! Grammar:
 //! ```text
-//! gdiff                 # Uncommitted (default)
-//! gdiff <ref>           # working tree vs <ref>
-//! gdiff <ref>..<ref>    # commit range
-//! gdiff --staged        # index vs HEAD
-//! gdiff --pr [N]        # PR via gh (current branch if N omitted)
-//! gdiff --smart         # enable smart auto-selection
+//! gandr                 # Uncommitted (default)
+//! gandr <ref>           # working tree vs <ref>
+//! gandr <ref>..<ref>    # commit range
+//! gandr --staged        # index vs HEAD
+//! gandr --pr [N]        # PR via gh (current branch if N omitted)
+//! gandr --smart         # enable smart auto-selection
 //! ```
-//! Path scoping (`gdiff <path>`) is deferred (see PLAN backlog): a bare positional
+//! Path scoping (`gandr <path>`) is deferred (see PLAN backlog): a bare positional
 //! is treated as a ref, since ref/path disambiguation needs a `--` convention.
 
 use crate::git::CompareSpec;

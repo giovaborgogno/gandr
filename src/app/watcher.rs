@@ -2,7 +2,7 @@
 //!
 //! Watches the repo root (recursively, debounced) and signals on a channel when
 //! non-`.git` files change. The `.git` directory is ignored to avoid refresh
-//! storms from git's own writes (and gdiff's own `.git/gdiff/state.json`).
+//! storms from git's own writes (and gandr's own `.git/gandr/state.json`).
 
 use anyhow::Result;
 use crossbeam_channel::Receiver;
@@ -21,7 +21,7 @@ pub struct Watcher {
 }
 
 /// Start watching `root` recursively. Errors (e.g. an unwatchable path) are the
-/// caller's to tolerate — gdiff simply runs without auto-refresh.
+/// caller's to tolerate — gandr simply runs without auto-refresh.
 pub fn watch(root: &Path) -> Result<Watcher> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut debouncer = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {

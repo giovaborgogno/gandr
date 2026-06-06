@@ -1,7 +1,7 @@
 //! Unit tests for CLI argument parsing.
 
-use gdiff::cli::parse_args;
-use gdiff::git::CompareSpec;
+use gandr::cli::parse_args;
+use gandr::git::CompareSpec;
 
 fn args(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()

@@ -1,9 +1,9 @@
 //! Tests for backend ref listing (M9). No TUI — validates the data the fuzzy
 //! ref picker consumes.
 
-use gdiff::git::git2_backend::Git2Backend;
-use gdiff::git::{GitBackend, RefKind};
-use gdiff::testutil::Fixture;
+use gandr::git::git2_backend::Git2Backend;
+use gandr::git::{GitBackend, RefKind};
+use gandr::testutil::Fixture;
 
 #[test]
 fn list_refs_groups_branches_then_tags_each_sorted() {

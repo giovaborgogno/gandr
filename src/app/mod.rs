@@ -1818,7 +1818,7 @@ fn run_loop(
         }
 
         // Honor a queued editor request: suspend the TUI + pause the input reader
-        // (so the editor — not gdiff — receives keystrokes), run it, then resume.
+        // (so the editor — not gandr — receives keystrokes), run it, then resume.
         if let Some((path, line)) = app.take_editor_request() {
             use std::sync::atomic::Ordering;
             input_paused.store(true, Ordering::Release);

@@ -1,6 +1,6 @@
 //! Per-repo review tracking: which files were marked reviewed, plus a content
 //! hash so files that changed *after* review can be flagged. Persisted to
-//! `.git/gdiff/state.json`, keyed by comparison.
+//! `.git/gandr/state.json`, keyed by comparison.
 
 use crate::diff::{FileDiff, LineKind};
 use serde::{Deserialize, Serialize};
@@ -56,9 +56,9 @@ pub fn diff_hash(file: &FileDiff) -> u64 {
 impl ReviewState {
     /// Where the state file lives, under the repo's git directory. `git_dir` is
     /// libgit2's resolved path (handles worktrees/submodules where `.git` is a
-    /// file), so the `gdiff/` subdir is always creatable.
+    /// file), so the `gandr/` subdir is always creatable.
     pub fn state_path(git_dir: &Path) -> PathBuf {
-        git_dir.join("gdiff").join("state.json")
+        git_dir.join("gandr").join("state.json")
     }
 
     /// Load from disk, returning an empty state if missing or unreadable.
