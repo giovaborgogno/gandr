@@ -69,7 +69,13 @@ fn main() -> Result<()> {
         ));
     }
 
-    let (w, h) = (110u16, 30u16);
+    let env_u16 = |k: &str, d: u16| {
+        std::env::var(k)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(d)
+    };
+    let (w, h) = (env_u16("GDIFF_COLS", 110), env_u16("GDIFF_ROWS", 30));
     let mut terminal = Terminal::new(TestBackend::new(w, h))?;
     let completed = terminal.draw(|f| app.render(f))?;
     let buf = completed.buffer;

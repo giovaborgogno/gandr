@@ -251,13 +251,9 @@ impl App {
         )
     }
 
-    /// The contextual key hints at the bottom (or the last error, if any).
-    pub fn keybar_line(&self) -> String {
-        if let Some(err) = &self.error {
-            return format!("⚠ {err}");
-        }
-        "Space review · c compare · s split · w word · r refresh · a auto · ? help · q quit"
-            .to_string()
+    /// The last error to surface in the keybar, if any.
+    pub fn error_message(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     /// Let the renderer record the diff-viewport height for page math.

@@ -98,10 +98,16 @@ pub fn render(
     palette: &Palette,
     word_on: bool,
 ) {
-    let all = rows(file, area.width as usize, hl, palette, word_on);
+    // Reserve the rightmost column for the scrollbar.
+    let content = Rect {
+        width: area.width.saturating_sub(1),
+        ..area
+    };
+    let all = rows(file, content.width as usize, hl, palette, word_on);
+    let total = all.len();
     let height = area.height as usize;
-    let max_scroll = all.len().saturating_sub(height);
-    let effective = scroll.min(max_scroll);
+    let effective = scroll.min(total.saturating_sub(height));
     let visible: Vec<Line> = all.into_iter().skip(effective).take(height).collect();
-    f.render_widget(Paragraph::new(visible), area);
+    f.render_widget(Paragraph::new(visible), content);
+    super::render_scrollbar(f, area, total, effective);
 }

@@ -14,11 +14,66 @@ use crate::highlight::{Highlighter, Palette};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 /// Width of the file tree panel, in columns.
 const TREE_WIDTH: u16 = 32;
+
+/// Key hints shown in the keybar (key, label).
+const KEYBAR: &[(&str, &str)] = &[
+    ("j/k", "move"),
+    ("Tab", "focus"),
+    ("n/p", "file"),
+    ("]/[", "hunk"),
+    ("c", "compare"),
+    ("Space", "review"),
+    ("s", "split"),
+    ("/", "find"),
+    ("e", "edit"),
+    ("?", "help"),
+    ("q", "quit"),
+];
+
+/// Build the styled keybar line: keys highlighted, labels dim.
+fn keybar_hints() -> Line<'static> {
+    let mut spans = Vec::with_capacity(KEYBAR.len() * 3);
+    for (i, (key, label)) in KEYBAR.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", Style::default()));
+        }
+        spans.push(Span::styled(
+            *key,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {label}"),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// Draw a vertical scrollbar on the right edge of `area` for `total` rows at `pos`.
+/// No-op when everything fits.
+pub(crate) fn render_scrollbar(f: &mut Frame, area: Rect, total: usize, pos: usize) {
+    let height = area.height as usize;
+    if total <= height {
+        return;
+    }
+    let mut state = ScrollbarState::new(total)
+        .viewport_content_length(height)
+        .position(pos.min(total.saturating_sub(1)));
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .thumb_symbol("█")
+        .track_symbol(Some("│"))
+        .style(Style::default().fg(Color::DarkGray));
+    f.render_stateful_widget(bar, area, &mut state);
+}
 
 /// Border highlight when a pane is focused.
 fn border_style(focused: bool) -> Style {
@@ -52,19 +107,23 @@ pub fn render(app: &App, f: &mut Frame) {
     render_file_list(app, f, tree_area);
     render_viewer(app, f, viewer);
 
-    // The keybar doubles as the search prompt while searching.
-    let (keybar_text, keybar_style) = match app.search() {
-        Some(s) if s.editing => (format!("/{}", s.query), Style::default().fg(Color::Yellow)),
-        Some(s) => (
+    // The keybar doubles as the search prompt / error line.
+    let keybar_line = match (app.search(), app.error_message()) {
+        (Some(s), _) if s.editing => Line::from(Span::styled(
+            format!("/{}", s.query),
+            Style::default().fg(Color::Yellow),
+        )),
+        (Some(s), _) => Line::from(Span::styled(
             format!("/{}   n/N next·prev · Esc close", s.query),
             Style::default().fg(Color::Yellow),
-        ),
-        None => (app.keybar_line(), Style::default().fg(Color::DarkGray)),
+        )),
+        (None, Some(err)) => Line::from(Span::styled(
+            format!("⚠ {err}"),
+            Style::default().fg(Color::Red),
+        )),
+        (None, None) => keybar_hints(),
     };
-    f.render_widget(
-        Paragraph::new(Span::styled(keybar_text, keybar_style)),
-        keybar,
-    );
+    f.render_widget(Paragraph::new(keybar_line), keybar);
 
     if let Some(picker) = app.picker() {
         render_picker(f, f.area(), picker);
