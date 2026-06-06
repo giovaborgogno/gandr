@@ -535,6 +535,40 @@ fn diff_highlight_invalidates_on_same_path_edit() {
     assert_eq!(after.len(), 3);
 }
 
+// ---- edge cases: render without panic ----
+
+#[test]
+fn binary_file_diff_shows_indicator() {
+    let fx = Fixture::new();
+    fx.write_bytes("data.bin", &[0u8, 159, 146, 150, 1, 2, 3]);
+    fx.commit("init");
+    fx.write_bytes("data.bin", &[0u8, 1, 2, 3, 4, 5, 6, 7]);
+    let app = app_from(&fx);
+    let out = frame(&app, 80, 12);
+    assert!(
+        out.contains("Binary file"),
+        "expected a binary indicator:\n{out}"
+    );
+}
+
+#[test]
+fn large_file_in_files_tab_renders_without_panic() {
+    // Over HL_MAX_LINES → the per-visible-line highlight fallback path.
+    let fx = Fixture::new();
+    let big: String = (1..=3000).map(|n| format!("let v{n} = {n};\n")).collect();
+    fx.write("big.rs", &big);
+    fx.commit("init");
+    fx.write("a.txt", "x\n"); // give the diff tab something too
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(key('j')); // onto big.rs (or a.txt) — load a file
+                              // Render at a few sizes; the fallback path must not panic.
+    for (w, h) in [(80, 24), (40, 10), (120, 50)] {
+        let out = frame(&app, w, h);
+        assert!(!out.is_empty());
+    }
+}
+
 // ---- Per-gap expand (fold markers + Enter) ----
 
 #[test]

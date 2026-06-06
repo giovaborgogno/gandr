@@ -516,6 +516,18 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(file_header_line(app, file), file_header);
     app.set_viewport(diff_body.height as usize);
 
+    // A binary file has no text diff to render.
+    if file.change.is_binary {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "Binary file — no text diff.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            diff_body,
+        );
+        return;
+    }
+
     let mode = app.theme_mode();
     let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
