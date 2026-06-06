@@ -149,6 +149,17 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [ ] M10 — Search across all files (jump to file + match), not just the current file.
 - [ ] M11 — Expand context (`o`): reveal more lines around a hunk.
 - [ ] M12 — Multi-line syntax highlighting (carry syntect state across a file).
+- [ ] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
+      NOT tokio — git2/FS/grep are blocking libs, so a thread pool + an
+      epoch token for superseding stale work is the right model). Unified event
+      loop (terminal input + job results + file-watch on one channel). Heavy
+      work (diff recompute, file load, search) runs off the UI thread; results
+      post back as events. Initial diff stays sync (fast startup + tests).
+- [ ] M14 — **Repo-wide search via embedded crates**: `ignore` for file-name
+      search (fd-style, respects .gitignore) and `grep`/`grep-searcher` for
+      content search (ripgrep-style) — no external binaries. Search runs async
+      (M13). `/` becomes: in-diff (current), file-name (Files tab), and
+      repo content search with a results list that jumps to file + line.
 
 ## Backlog / later (not v1)
 

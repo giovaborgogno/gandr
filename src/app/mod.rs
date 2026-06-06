@@ -1,5 +1,6 @@
 //! Application state, the event loop, and key dispatch.
 
+pub mod jobs;
 pub mod watcher;
 
 use crate::browser::Browser;
@@ -11,15 +12,11 @@ use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
-
-/// How long the loop blocks waiting for input before redrawing.
-const TICK: Duration = Duration::from_millis(250);
 
 /// Which pane the directional keys act on. Navigation is *hybrid*: `Tab` switches
 /// focus (driving `j`/`k`), but `n`/`p` (file) and `]`/`[` (hunk) work regardless.
@@ -92,6 +89,12 @@ pub struct App {
     review_cache: Vec<ReviewStatus>,
     /// Whether file changes auto-refresh the diff (working-tree comparisons).
     auto_refresh: bool,
+    /// Monotonic token; a background diff result is applied only if it matches.
+    refresh_epoch: u64,
+    /// A queued async refresh (epoch) the event loop should spawn.
+    pending_refresh: Option<u64>,
+    /// Whether a background recompute is in flight (shown in the header).
+    loading: bool,
     /// Light/dark rendering mode (resolved from config/terminal in `run`).
     theme_mode: ThemeMode,
     /// The active top-level tab.
@@ -156,6 +159,9 @@ impl App {
             review_path,
             review_cache: Vec::new(),
             auto_refresh,
+            refresh_epoch: 0,
+            pending_refresh: None,
+            loading: false,
             theme_mode: ThemeMode::Dark,
             tab: Tab::Diff,
             browser,
@@ -267,8 +273,9 @@ impl App {
         } else {
             ""
         };
+        let load = if self.loading { " · ⟳ loading" } else { "" };
         format!(
-            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}"
+            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}{load}"
         )
     }
 
@@ -467,50 +474,74 @@ impl App {
         self.tree_scroll.set(0);
     }
 
-    /// Switch the comparison and recompute the diff, reverting on failure.
+    /// Switch the comparison and recompute the diff asynchronously (the event
+    /// loop spawns the job; the result replaces the file set when it arrives).
     fn set_spec(&mut self, spec: CompareSpec, title: Option<String>) {
-        match engine::build_diffs(self.backend.as_ref(), &spec, self.config.context_lines) {
-            Ok(files) => {
-                self.spec = spec;
-                self.title = title;
-                self.error = None;
-                self.files = files;
-                self.collapsed.clear();
-                self.reset_view();
-                self.recompute_review();
+        self.spec = spec;
+        self.title = title;
+        self.collapsed.clear();
+        self.request_refresh();
+    }
+
+    /// Apply a freshly-computed file set, preserving the selected file (by path)
+    /// and scroll where possible.
+    fn apply_files(&mut self, files: Vec<FileDiff>) {
+        let prev_path = self.current().map(|f| f.change.path.clone());
+        let prev_scroll = self.scroll;
+        self.files = files;
+        self.error = None;
+        if let Some(idx) =
+            prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
+        {
+            self.selected = idx;
+            if let Some(c) = self
+                .tree_rows()
+                .iter()
+                .position(|r| r.file_index() == Some(idx))
+            {
+                self.tree_cursor = c;
             }
+            self.scroll = prev_scroll.min(self.max_scroll());
+        } else {
+            self.reset_view();
+        }
+        self.recompute_review();
+    }
+
+    /// Synchronously recompute the diff (used in tests and as a fallback).
+    pub fn refresh(&mut self) {
+        match engine::build_diffs(self.backend.as_ref(), &self.spec, self.config.context_lines) {
+            Ok(files) => self.apply_files(files),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    /// Recompute the diff for the current comparison, preserving the selected
-    /// file (by path) and scroll where possible. Used by `r` and the watcher.
-    pub fn refresh(&mut self) {
-        let prev_path = self.current().map(|f| f.change.path.clone());
-        let prev_scroll = self.scroll;
-        match engine::build_diffs(self.backend.as_ref(), &self.spec, self.config.context_lines) {
-            Ok(files) => {
-                self.files = files;
-                self.error = None;
-                if let Some(idx) =
-                    prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
-                {
-                    self.selected = idx;
-                    if let Some(c) = self
-                        .tree_rows()
-                        .iter()
-                        .position(|r| r.file_index() == Some(idx))
-                    {
-                        self.tree_cursor = c;
-                    }
-                    self.scroll = prev_scroll.min(self.max_scroll());
-                } else {
-                    self.reset_view();
-                }
-                self.recompute_review();
-            }
+    /// Request an async refresh (the event loop spawns the background job).
+    pub fn request_refresh(&mut self) {
+        self.refresh_epoch += 1;
+        self.pending_refresh = Some(self.refresh_epoch);
+        self.loading = true;
+    }
+
+    /// Take a queued refresh request: returns (epoch, spec) for the loop to spawn.
+    pub fn take_pending_refresh(&mut self) -> Option<(u64, CompareSpec)> {
+        self.pending_refresh.take().map(|e| (e, self.spec.clone()))
+    }
+
+    /// Apply a background diff result, ignoring it if a newer refresh superseded it.
+    pub fn apply_diff_result(&mut self, epoch: u64, files: Result<Vec<FileDiff>>) {
+        if epoch != self.refresh_epoch {
+            return; // stale; a newer refresh is in flight
+        }
+        self.loading = false;
+        match files {
+            Ok(files) => self.apply_files(files),
             Err(e) => self.error = Some(e.to_string()),
         }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
     }
 
     /// Toggle review of the selected file and persist.
@@ -783,7 +814,7 @@ impl App {
             KeyCode::Char('s') => self.view = self.view.toggled(),
             KeyCode::Char('w') => self.config.word_diff = !self.config.word_diff,
             KeyCode::Char(' ') => self.toggle_review(),
-            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('r') => self.request_refresh(),
             KeyCode::Char('a') => self.auto_refresh = !self.auto_refresh,
 
             KeyCode::Char('d') if ctrl => self.scroll_down(half_page),
@@ -874,23 +905,42 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     };
     app.set_theme_mode(mode);
 
-    // Watch the working tree for live auto-refresh (best-effort).
     let root = app.context().root.clone();
+
+    // One channel the UI loop blocks on: terminal input + job results + file changes.
+    let (tx, rx) = crossbeam_channel::unbounded::<jobs::AppEvent>();
+    jobs::spawn_input(tx.clone());
+
+    // Watch the working tree (best-effort), forwarding changes onto the channel.
     let watch = watcher::watch(&root).ok();
+    if let Some(w) = &watch {
+        let (wtx, wrx) = (tx.clone(), w.rx.clone());
+        std::thread::spawn(move || {
+            while wrx.recv().is_ok() {
+                if wtx.send(jobs::AppEvent::FileChanged).is_err() {
+                    break;
+                }
+            }
+        });
+    }
 
     let mut terminal = ratatui::try_init()?;
-    let result = run_loop(&mut app, &mut terminal, watch.as_ref());
+    let result = run_loop(&mut app, &mut terminal, &rx, &tx, &root);
     ratatui::restore();
+    drop(watch); // stop watching
     result
 }
 
 fn run_loop(
     app: &mut App,
     terminal: &mut DefaultTerminal,
-    watch: Option<&watcher::Watcher>,
+    rx: &crossbeam_channel::Receiver<jobs::AppEvent>,
+    tx: &crossbeam_channel::Sender<jobs::AppEvent>,
+    root: &std::path::Path,
 ) -> Result<()> {
-    // Event-driven: only redraw when something changed, so an idle gdiff uses ~no
-    // CPU (instead of repainting every tick).
+    let context = app.config().context_lines;
+    // Event-driven: redraw only when something changed; heavy work runs on
+    // background threads and posts results as events.
     let mut dirty = true;
     while !app.should_quit() {
         if dirty {
@@ -898,27 +948,33 @@ fn run_loop(
             dirty = false;
         }
 
-        // Drain pending file-change notifications; refresh once if any apply.
-        if let Some(w) = watch {
-            let mut changed = false;
-            while w.rx.try_recv().is_ok() {
-                changed = true;
-            }
-            if changed && app.auto_refresh() && app.spec_is_live() {
-                app.refresh();
-                dirty = true;
-            }
+        // Spawn any queued async refresh, then redraw the loading state.
+        if let Some((epoch, spec)) = app.take_pending_refresh() {
+            jobs::spawn_diff(tx.clone(), root.to_path_buf(), spec, context, epoch);
+            dirty = true;
+            continue;
         }
 
-        if event::poll(TICK)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    app.handle_key(key);
-                    dirty = true;
-                }
-                Event::Resize(_, _) => dirty = true,
-                _ => {}
+        match rx.recv() {
+            Ok(jobs::AppEvent::Term(Event::Key(key))) => {
+                app.handle_key(key);
+                dirty = true;
             }
+            Ok(jobs::AppEvent::Term(Event::Resize(_, _))) => dirty = true,
+            Ok(jobs::AppEvent::Term(_)) => {}
+            Ok(jobs::AppEvent::FileChanged) => {
+                if app.auto_refresh() && app.spec_is_live() {
+                    app.request_refresh();
+                }
+            }
+            Ok(jobs::AppEvent::DiffReady { epoch, files }) => {
+                app.apply_diff_result(epoch, files);
+                dirty = true;
+            }
+            // The input thread holds a sender for the whole run, so recv only
+            // errors at shutdown; the loop normally exits via `should_quit`.
+            // Detached worker/input threads are abandoned when main returns.
+            Err(_) => break,
         }
 
         // Honor a queued editor request: suspend the TUI, run the editor, resume.

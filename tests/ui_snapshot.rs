@@ -353,6 +353,35 @@ fn light_theme_uses_light_backgrounds() {
     assert!(found, "expected light-mode add background somewhere");
 }
 
+// ---- M13: async refresh (epoch supersession) ----
+
+#[test]
+fn async_refresh_ignores_stale_results() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    fx.write("a.txt", "y\n");
+    let mut app = app_from(&fx);
+    assert!(!app.files().is_empty());
+
+    app.request_refresh();
+    assert!(app.is_loading());
+
+    // A result from a superseded (older) epoch is ignored.
+    app.apply_diff_result(0, Ok(vec![]));
+    assert!(app.is_loading());
+    assert!(
+        !app.files().is_empty(),
+        "stale result must not replace files"
+    );
+
+    // The current epoch's result is applied.
+    let (epoch, _spec) = app.take_pending_refresh().unwrap();
+    app.apply_diff_result(epoch, Ok(vec![]));
+    assert!(!app.is_loading());
+    assert!(app.files().is_empty());
+}
+
 // ---- M8: tabs + files browser ----
 
 #[test]
