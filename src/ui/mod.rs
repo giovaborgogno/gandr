@@ -7,6 +7,7 @@ pub mod viewer_unified;
 
 use crate::app::{App, Focus};
 use crate::diff::FileDiff;
+use crate::highlight::{Highlighter, Palette};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -104,7 +105,18 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
 
     f.render_widget(file_header_line(app, file), file_header);
     app.set_viewport(diff_body.height as usize);
-    viewer_unified::render(f, diff_body, file, app.scroll());
+
+    let hl = Highlighter::for_path(&file.change.path);
+    let palette = Palette::default();
+    viewer_unified::render(
+        f,
+        diff_body,
+        file,
+        app.scroll(),
+        &hl,
+        &palette,
+        app.config().word_diff,
+    );
 }
 
 /// The sticky one-line file header: path, per-file counts, and position.

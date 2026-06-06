@@ -2,7 +2,7 @@
 //! `imara-diff`. Line-level hunks with context folding here; intra-line word
 //! [`Segment`](super::Segment)s arrive in M3.
 
-use super::{FileDiff, Hunk, Line, LineKind};
+use super::{word, FileDiff, Hunk, Line, LineKind};
 use crate::git::{CompareSpec, FileChange, GitBackend};
 use anyhow::Result;
 use imara_diff::{sources::lines, Algorithm, Diff, InternedInput};
@@ -89,26 +89,41 @@ fn build_hunk(
         if let Some(change) = group.get(ci) {
             if old_i == change.before.start as usize {
                 let (ds, de) = (change.before.start as usize, change.before.end as usize);
-                for (offset, text) in old_lines[ds..de].iter().enumerate() {
-                    out.push(Line {
+                let (as_, ae) = (change.after.start as usize, change.after.end as usize);
+
+                let mut del_lines: Vec<Line> = old_lines[ds..de]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, text)| Line {
                         kind: LineKind::Del,
                         old_no: Some((ds + offset) as u32 + 1),
                         new_no: None,
                         text: strip_newline(text).to_string(),
                         segments: Vec::new(),
-                    });
-                }
-                old_i = de;
-                let (as_, ae) = (change.after.start as usize, change.after.end as usize);
-                for (offset, text) in new_lines[as_..ae].iter().enumerate() {
-                    out.push(Line {
+                    })
+                    .collect();
+                let mut add_lines: Vec<Line> = new_lines[as_..ae]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, text)| Line {
                         kind: LineKind::Add,
                         old_no: None,
                         new_no: Some((as_ + offset) as u32 + 1),
                         text: strip_newline(text).to_string(),
                         segments: Vec::new(),
-                    });
+                    })
+                    .collect();
+
+                // Word-level emphasis for removed/added lines paired by position.
+                for (del, add) in del_lines.iter_mut().zip(add_lines.iter_mut()) {
+                    let (old_segs, new_segs) = word::segments(&del.text, &add.text);
+                    del.segments = old_segs;
+                    add.segments = new_segs;
                 }
+
+                out.extend(del_lines);
+                out.extend(add_lines);
+                old_i = de;
                 new_i = ae;
                 ci += 1;
                 continue;

@@ -209,6 +209,7 @@ impl App {
                 }
             }
             KeyCode::Char('s') => self.view = self.view.toggled(),
+            KeyCode::Char('w') => self.config.word_diff = !self.config.word_diff,
 
             KeyCode::Char('d') if ctrl => self.scroll_down(half_page),
             KeyCode::Char('u') if ctrl => self.scroll_up(half_page),

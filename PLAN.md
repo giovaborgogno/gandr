@@ -11,7 +11,7 @@
 - [x] M0 — Scaffold + skeleton
 - [x] M1 — Git + diff model (no TUI)
 - [x] M2 — Core TUI (unified)
-- [ ] M3 — Delta-style rendering
+- [x] M3 — Delta-style rendering
 - [ ] M4 — Tree + side-by-side
 - [ ] M5 — Compare picker + smart + PR
 - [ ] M6 — Live watch + review state
@@ -99,11 +99,11 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] Snapshot tests for unified rendering across fixtures (modify, multi-file, nav, scroll, empty).
 - Deliverable: a usable unified diff viewer driven entirely by keyboard.
 
-### M3 — Delta-style rendering
-- [ ] Background colors for add/del lines; line-number gutters; hunk bar.
-- [ ] Word-level segments (imara-diff at word granularity) → stronger bg; `w` toggle.
-- [ ] syntect highlighting + `compose` (syntax fg over diff bg over word bg).
-- [ ] Snapshot tests covering colored output (insta captures styles).
+### M3 — Delta-style rendering ✅
+- [x] Background colors for add/del lines; line-number gutters; colored change bar.
+- [x] Word-level segments (imara-diff at word granularity) → stronger bg; `w` toggle.
+- [x] syntect highlighting (two-face, per-line) + `compose` (syntax fg over diff bg over word bg).
+- [x] Style-aware snapshot tests (background-legend map) + word-toggle + syntax-fg + multibyte safety.
 - Deliverable: looks like delta.
 
 ### M4 — Tree + side-by-side
@@ -135,6 +135,10 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ## Backlog / later (not v1)
 
+- Tab expansion (`config.tab_width`) and display-width-aware background fill
+  (`unicode-width`) in the viewer — currently the bg fill uses char count, so
+  CJK/wide chars and tabs can leave the delta background slightly short of the
+  edge (cosmetic; no panic — ratatui truncates overflow).
 - Real-PTY e2e smoke test (`portable-pty`/`expectrl`).
 - Tree view for huge PRs: virtualized rendering.
 - PR description / metadata side panel.
