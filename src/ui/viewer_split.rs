@@ -180,7 +180,7 @@ pub fn rows(
     while i < display.len() {
         match &display[i] {
             DiffRow::Fold { hidden, .. } => {
-                out.push(fold_marker(*hidden, width));
+                out.push(fold_marker(*hidden, width, false));
                 i += 1;
             }
             DiffRow::Line(_) => {

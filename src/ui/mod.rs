@@ -364,10 +364,19 @@ fn keybar_line(app: &App) -> Line<'static> {
             format!("/{}", s.query),
             Style::default().fg(Color::Yellow),
         )),
-        (Some(s), _) => Line::from(Span::styled(
-            format!("/{}   n/N next·prev · Esc close", s.query),
-            Style::default().fg(Color::Yellow),
-        )),
+        (Some(s), _) => {
+            let pos = match app.search_match_position() {
+                Some((i, n)) => format!("  [{i}/{n}]"),
+                None => match app.search_match_count() {
+                    0 => "  [no matches]".to_string(),
+                    n => format!("  [{n} matches]"),
+                },
+            };
+            Line::from(Span::styled(
+                format!("/{}{pos}   n/N next·prev · Esc close", s.query),
+                Style::default().fg(Color::Yellow),
+            ))
+        }
         (None, Some(err)) => Line::from(Span::styled(
             format!("⚠ {err}"),
             Style::default().fg(Color::Red),
@@ -544,35 +553,22 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     // Folded display rows (per-gap expand) over the file's full line list.
     let full = app.full_lines();
     let display = app.display_rows();
+    // The cursor marks the current line; the viewport follows it.
+    let cursor = app.diff_cursor();
+    let scroll = app.diff_scroll(diff_body.height as usize);
     // Highlight search matches in the diff while a (non-empty) query is active.
     let query = app
         .search()
         .map(|s| s.query.as_str())
         .filter(|q| !q.is_empty());
+    let focused = app.focus() == Focus::Diff;
     match app.view() {
         ViewMode::Unified => viewer_unified::render(
-            f,
-            diff_body,
-            &full,
-            &display,
-            app.scroll(),
-            old_hl,
-            new_hl,
-            &palette,
-            word_on,
-            query,
+            f, diff_body, &full, &display, scroll, cursor, focused, old_hl, new_hl, &palette,
+            word_on, query,
         ),
         ViewMode::SideBySide => viewer_split::render(
-            f,
-            diff_body,
-            &full,
-            &display,
-            app.scroll(),
-            old_hl,
-            new_hl,
-            &palette,
-            word_on,
-            query,
+            f, diff_body, &full, &display, scroll, old_hl, new_hl, &palette, word_on, query,
         ),
     }
 }

@@ -26,20 +26,24 @@ pub(crate) fn gutter_width(full: &[DiffLine]) -> usize {
 }
 
 /// The "⋯ N unchanged lines ⋯" marker shown for a collapsed fold; pressing Enter
-/// (with the diff focused) expands the one nearest the top of the viewport.
-pub(crate) fn fold_marker(hidden: usize, width: usize) -> Line<'static> {
+/// (diff focused) expands the one under the cursor. `is_cursor` highlights it.
+pub(crate) fn fold_marker(hidden: usize, width: usize, is_cursor: bool) -> Line<'static> {
     let label = format!(" ⋯ {hidden} unchanged lines · Enter to expand ⋯");
     let mut text = label.chars().take(width).collect::<String>();
     let used = text.chars().count();
     if used < width {
         text.push_str(&" ".repeat(width - used));
     }
-    Line::from(Span::styled(
-        text,
+    let style = if is_cursor {
         Style::default()
             .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    ))
+            .add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
+    };
+    Line::from(Span::styled(text, style))
 }
 
 fn num_cell(no: Option<u32>, width: usize) -> String {
@@ -74,6 +78,8 @@ pub(crate) fn line_fg<'a>(
 }
 
 /// Build a styled [`Line`] for one diff line, filling the background to `width`.
+/// `is_cursor` marks the current line (its gutter is reversed — "you are here").
+#[allow(clippy::too_many_arguments)]
 fn line_row(
     line: &DiffLine,
     w: usize,
@@ -82,6 +88,7 @@ fn line_row(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    is_cursor: bool,
 ) -> Line<'static> {
     let (bar, bar_color, base_bg) = match line.kind {
         LineKind::Add => ('▌', Color::Green, Some(palette.add_bg)),
@@ -90,8 +97,13 @@ fn line_row(
     };
 
     let gutter = format!("{} {} ", num_cell(line.old_no, w), num_cell(line.new_no, w));
+    let gutter_style = if is_cursor {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let mut spans = vec![
-        Span::styled(gutter, Style::default().fg(Color::DarkGray)),
+        Span::styled(gutter, gutter_style),
         Span::styled(bar.to_string(), Style::default().fg(bar_color)),
         Span::raw(" "),
     ];
@@ -120,7 +132,6 @@ fn line_row(
     Line::from(spans)
 }
 
-/// Build every display row of the file's folded diff as a styled [`Line`].
 /// Build one display row (a fold marker or a diff line) as a styled [`Line`].
 #[allow(clippy::too_many_arguments)]
 fn build_row(
@@ -133,15 +144,16 @@ fn build_row(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    is_cursor: bool,
 ) -> Line<'static> {
     match row {
-        DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width),
+        DiffRow::Fold { hidden, .. } => fold_marker(*hidden, width, is_cursor),
         // `.get` rather than `full[*idx]`: indices come from a coherent display
         // cache today, but a graceful empty row beats a panic if that ever slips.
         DiffRow::Line(idx) => match full.get(*idx) {
             Some(line) => {
                 let fg = line_fg(line, old_hl, new_hl);
-                line_row(line, w, width, fg, palette, word_on, query)
+                line_row(line, w, width, fg, palette, word_on, query, is_cursor)
             }
             None => Line::from(""),
         },
@@ -164,14 +176,17 @@ pub fn rows(
     let w = gutter_width(full);
     display
         .iter()
-        .map(|row| build_row(row, full, w, width, old_hl, new_hl, palette, word_on, query))
+        .map(|row| {
+            build_row(
+                row, full, w, width, old_hl, new_hl, palette, word_on, query, false,
+            )
+        })
         .collect()
 }
 
-/// Render the unified diff for `file` into `area`, scrolled to `scroll` rows.
-///
-/// `scroll` is clamped to the last full screen so a stale/over-large value still
-/// shows content rather than a blank panel.
+/// Render the unified diff into `area`, scrolled to `scroll`, with the current
+/// line at `cursor` highlighted (when `focused`). Builds only the visible window,
+/// so per-frame cost is O(viewport), independent of file size.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
@@ -179,6 +194,8 @@ pub fn render(
     full: &[DiffLine],
     display: &[DiffRow],
     scroll: usize,
+    cursor: usize,
+    focused: bool,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
     palette: &Palette,
@@ -199,7 +216,13 @@ pub fn render(
     let width = content.width as usize;
     let visible: Vec<Line> = display[effective..(effective + height).min(total)]
         .iter()
-        .map(|row| build_row(row, full, w, width, old_hl, new_hl, palette, word_on, query))
+        .enumerate()
+        .map(|(i, row)| {
+            let is_cursor = focused && effective + i == cursor;
+            build_row(
+                row, full, w, width, old_hl, new_hl, palette, word_on, query, is_cursor,
+            )
+        })
         .collect();
     f.render_widget(Paragraph::new(visible), content);
     super::render_scrollbar(f, area, total, effective);

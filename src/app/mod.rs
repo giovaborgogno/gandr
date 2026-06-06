@@ -91,8 +91,11 @@ pub struct App {
     files: Vec<FileDiff>,
     /// Index into `files` of the selected file (the one shown in the viewer).
     selected: usize,
-    /// First visible row of the diff viewer for the selected file.
-    scroll: usize,
+    /// Current line in the diff viewer (a display-row index); j/k move it and
+    /// the viewport follows. The row under it is highlighted ("you are here").
+    diff_cursor: usize,
+    /// First visible diff row (follows the cursor); updated at render.
+    diff_scroll: Cell<usize>,
     /// Collapsed directory paths in the file tree (absent = expanded).
     collapsed: HashSet<PathBuf>,
     /// Cursor over the tree's visible rows (dirs + files).
@@ -236,7 +239,8 @@ impl App {
             error: None,
             files,
             selected: 0,
-            scroll: 0,
+            diff_cursor: 0,
+            diff_scroll: Cell::new(0),
             collapsed: HashSet::new(),
             tree_cursor: 0,
             tree_scroll: Cell::new(0),
@@ -295,8 +299,25 @@ impl App {
     pub fn selected(&self) -> usize {
         self.selected
     }
-    pub fn scroll(&self) -> usize {
-        self.scroll
+    /// The current diff line (display-row index), for cursor highlighting.
+    pub fn diff_cursor(&self) -> usize {
+        self.diff_cursor
+    }
+
+    /// Viewport top for the diff, keeping the cursor visible across `height`
+    /// rows (mirrors `tree_scroll`); recorded for page/bottom math.
+    pub fn diff_scroll(&self, height: usize) -> usize {
+        let mut s = self.diff_scroll.get();
+        if self.diff_cursor < s {
+            s = self.diff_cursor;
+        } else if height > 0 && self.diff_cursor >= s + height {
+            s = self.diff_cursor + 1 - height;
+        }
+        // Clamp so we never scroll past the last screenful.
+        let max = self.total_rows().saturating_sub(height.max(1));
+        s = s.min(max);
+        self.diff_scroll.set(s);
+        s
     }
     pub fn should_quit(&self) -> bool {
         self.should_quit
@@ -553,11 +574,11 @@ impl App {
         if folds.is_empty() {
             return;
         }
-        // The fold at or after the current scroll (the gap below the top of the
-        // viewport); if we're past every fold, the nearest one above (the last).
+        // The fold at or after the cursor (the gap the user is on / heading into);
+        // if the cursor is past every fold, the nearest one above (the last).
         let (_, anchor) = folds
             .iter()
-            .find(|(row, _)| *row >= self.scroll)
+            .find(|(row, _)| *row >= self.diff_cursor)
             .copied()
             .unwrap_or_else(|| folds[folds.len() - 1]);
 
@@ -617,10 +638,6 @@ impl App {
         self.display_rows().len()
     }
 
-    fn max_scroll(&self) -> usize {
-        self.total_rows().saturating_sub(self.viewport.get().max(1))
-    }
-
     // ---- mutations ----
 
     /// Point the viewer at the file under the tree cursor (if it's a file row).
@@ -629,9 +646,15 @@ impl App {
         if let Some(idx) = rows.get(self.tree_cursor).and_then(Row::file_index) {
             if idx != self.selected {
                 self.selected = idx;
-                self.scroll = 0;
+                self.reset_diff_view();
             }
         }
+    }
+
+    /// Reset the diff cursor/scroll to the top (on selecting a different file).
+    fn reset_diff_view(&mut self) {
+        self.diff_cursor = 0;
+        self.diff_scroll.set(0);
     }
 
     fn cursor_down(&mut self) {
@@ -718,12 +741,25 @@ impl App {
         }
     }
 
-    fn scroll_down(&mut self, n: usize) {
-        self.scroll = (self.scroll + n).min(self.max_scroll());
+    /// Last valid diff-cursor index.
+    fn last_diff_row(&self) -> usize {
+        self.total_rows().saturating_sub(1)
     }
 
-    fn scroll_up(&mut self, n: usize) {
-        self.scroll = self.scroll.saturating_sub(n);
+    /// After a jump (hunk/search), put the cursor a few rows from the top so the
+    /// target and the lines below it are visible (not pinned to the bottom edge).
+    fn anchor_cursor_near_top(&self) {
+        const MARGIN: usize = 3;
+        self.diff_scroll
+            .set(self.diff_cursor.saturating_sub(MARGIN));
+    }
+
+    fn cursor_down_diff(&mut self, n: usize) {
+        self.diff_cursor = (self.diff_cursor + n).min(self.last_diff_row());
+    }
+
+    fn cursor_up_diff(&mut self, n: usize) {
+        self.diff_cursor = self.diff_cursor.saturating_sub(n);
     }
 
     /// Cycle how many context lines surround each hunk (expand, then wrap back to
@@ -739,19 +775,26 @@ impl App {
             .copied()
             .find(|&c| c > cur)
             .unwrap_or(LADDER[0]);
-        // Re-clamp scroll in case fewer rows are shown after re-folding.
-        self.scroll = self.scroll.min(self.max_scroll());
+        // Re-clamp the cursor in case fewer rows are shown after re-folding.
+        self.diff_cursor = self.diff_cursor.min(self.last_diff_row());
     }
 
     fn next_hunk(&mut self) {
-        if let Some(&off) = self.hunk_offsets().iter().find(|&&o| o > self.scroll) {
-            self.scroll = off.min(self.max_scroll());
+        if let Some(&off) = self.hunk_offsets().iter().find(|&&o| o > self.diff_cursor) {
+            self.diff_cursor = off;
+            self.anchor_cursor_near_top();
         }
     }
 
     fn prev_hunk(&mut self) {
-        if let Some(&off) = self.hunk_offsets().iter().rev().find(|&&o| o < self.scroll) {
-            self.scroll = off;
+        if let Some(&off) = self
+            .hunk_offsets()
+            .iter()
+            .rev()
+            .find(|&&o| o < self.diff_cursor)
+        {
+            self.diff_cursor = off;
+            self.anchor_cursor_near_top();
         }
     }
 
@@ -768,7 +811,7 @@ impl App {
             .get(self.tree_cursor)
             .and_then(Row::file_index)
             .unwrap_or(0);
-        self.scroll = 0;
+        self.reset_diff_view();
         self.tree_scroll.set(0);
     }
 
@@ -785,7 +828,7 @@ impl App {
     /// and scroll where possible.
     fn apply_files(&mut self, files: Vec<FileDiff>) {
         let prev_path = self.current().map(|f| f.change.path.clone());
-        let prev_scroll = self.scroll;
+        let prev_cursor = self.diff_cursor;
         self.files = files;
         self.error = None;
         // The file set (and thus old/new text) changed: drop per-file caches so a
@@ -802,7 +845,8 @@ impl App {
             {
                 self.tree_cursor = c;
             }
-            self.scroll = prev_scroll.min(self.max_scroll());
+            // Keep the cursor where it was, clamped to the (possibly shorter) file.
+            self.diff_cursor = prev_cursor.min(self.last_diff_row());
         } else {
             self.reset_view();
         }
@@ -915,13 +959,14 @@ impl App {
             .collect()
     }
 
-    /// Jump the viewer to the next/previous search match (wrapping).
+    /// Move the cursor to the next/previous search match (wrapping). The cursor
+    /// highlight marks which match you're on.
     fn search_jump(&mut self, forward: bool) {
         let matches = self.search_matches();
         if matches.is_empty() {
             return;
         }
-        let cur = self.scroll;
+        let cur = self.diff_cursor;
         let target = if forward {
             matches
                 .iter()
@@ -935,8 +980,25 @@ impl App {
                 .or_else(|| matches.last())
         };
         if let Some(&off) = target {
-            self.scroll = off.min(self.max_scroll());
+            self.diff_cursor = off.min(self.last_diff_row());
+            self.anchor_cursor_near_top();
         }
+    }
+
+    /// Position of the cursor among the search matches as (1-based index, total),
+    /// for the keybar; `None` when not searching or the cursor isn't on a match.
+    pub fn search_match_position(&self) -> Option<(usize, usize)> {
+        let matches = self.search_matches();
+        if matches.is_empty() {
+            return None;
+        }
+        let idx = matches.iter().position(|&o| o == self.diff_cursor)?;
+        Some((idx + 1, matches.len()))
+    }
+
+    /// Total number of search matches in the current file's diff.
+    pub fn search_match_count(&self) -> usize {
+        self.search_matches().len()
     }
 
     /// Route a key to search mode; returns whether it was handled.
@@ -1385,16 +1447,16 @@ impl App {
             KeyCode::Char('r') => self.request_refresh(),
             KeyCode::Char('a') => self.auto_refresh = !self.auto_refresh,
 
-            KeyCode::Char('d') if ctrl => self.scroll_down(half_page),
-            KeyCode::Char('u') if ctrl => self.scroll_up(half_page),
+            KeyCode::Char('d') if ctrl => self.cursor_down_diff(half_page),
+            KeyCode::Char('u') if ctrl => self.cursor_up_diff(half_page),
 
             KeyCode::Char('j') | KeyCode::Down => match self.focus {
                 Focus::Tree => self.cursor_down(),
-                Focus::Diff => self.scroll_down(1),
+                Focus::Diff => self.cursor_down_diff(1),
             },
             KeyCode::Char('k') | KeyCode::Up => match self.focus {
                 Focus::Tree => self.cursor_up(),
-                Focus::Diff => self.scroll_up(1),
+                Focus::Diff => self.cursor_up_diff(1),
             },
 
             // Tree expand/collapse; Enter on a file focuses the diff.
@@ -1419,8 +1481,8 @@ impl App {
             KeyCode::Char(']') => self.next_hunk(),
             KeyCode::Char('[') => self.prev_hunk(),
 
-            KeyCode::Char('g') => self.scroll = 0,
-            KeyCode::Char('G') => self.scroll = self.max_scroll(),
+            KeyCode::Char('g') => self.diff_cursor = 0,
+            KeyCode::Char('G') => self.diff_cursor = self.last_diff_row(),
 
             _ => {}
         }
