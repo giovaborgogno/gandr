@@ -17,11 +17,23 @@ fn app_from(fx: &Fixture) -> App {
     App::new(Config::default(), backend, CompareSpec::Uncommitted).unwrap()
 }
 
+/// Redact the non-deterministic repo path shown in the tab bar (fixtures use
+/// random temp dirs), so snapshots are stable.
+fn redact(s: &str) -> String {
+    s.lines()
+        .map(|l| match l.find("Files [2]") {
+            Some(i) => format!("{}   <repo>", &l[..i + "Files [2]".len()]),
+            None => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Render the App to a text frame of the given size.
 fn frame(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|f| app.render(f)).unwrap();
-    terminal.backend().to_string()
+    redact(&terminal.backend().to_string())
 }
 
 fn key(c: char) -> KeyEvent {
@@ -63,7 +75,7 @@ fn render_buffer(app: &App, width: u16, height: u16) -> (String, String) {
 /// delta-style add/del backgrounds and word-level emphasis headlessly).
 fn styled_frame(app: &App, width: u16, height: u16) -> String {
     let (glyphs, bgs) = render_buffer(app, width, height);
-    format!("{glyphs}── backgrounds ──\n{bgs}")
+    format!("{}── backgrounds ──\n{bgs}", redact(&glyphs))
 }
 
 #[test]
@@ -339,6 +351,21 @@ fn light_theme_uses_light_backgrounds() {
     let found = (0..buf.area.height)
         .any(|y| (0..buf.area.width).any(|x| buf.cell((x, y)).unwrap().bg == light_add));
     assert!(found, "expected light-mode add background somewhere");
+}
+
+// ---- M8: tabs + files browser ----
+
+#[test]
+fn files_tab_browser() {
+    let fx = Fixture::new();
+    fx.write("src/lib.rs", "pub fn run() {\n    let x = 1;\n}\n");
+    fx.write("README.md", "# demo\n");
+    fx.commit("init");
+    fx.write("src/lib.rs", "pub fn run() {\n    let x = 2;\n}\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // switch to Files tab
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // expand first dir (src)
+    insta::assert_snapshot!(frame(&app, 90, 14));
 }
 
 // ---- M5: compare picker ----

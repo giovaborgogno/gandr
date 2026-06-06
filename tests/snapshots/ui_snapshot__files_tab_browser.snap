@@ -1,0 +1,18 @@
+---
+source: tests/ui_snapshot.rs
+expression: "frame(&app, 90, 14)"
+---
+" Diff [1]   Files [2]   <repo>
+"Files · browsing the whole repo (including ignored)                                       "
+"┌Repo──────────────────────────────┐┌────────────────────────────────────────────────────┐"
+"│▾ src/                            ││Select a file to view its contents.                 │"
+"│    lib.rs                        ││                                                    │"
+"│  README.md                       ││                                                    │"
+"│                                  ││                                                    │"
+"│                                  ││                                                    │"
+"│                                  ││                                                    │"
+"│                                  ││                                                    │"
+"│                                  ││                                                    │"
+"│                                  ││                                                    │"
+"└──────────────────────────────────┘└────────────────────────────────────────────────────┘"
+"j/k move  Tab focus  Enter open/expand  ←/→ collapse/expand  1 diff  ? help  q quit       "

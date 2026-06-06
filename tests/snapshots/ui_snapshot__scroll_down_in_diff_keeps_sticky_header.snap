@@ -2,6 +2,7 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 14)"
 ---
+" Diff [1]   Files [2]   <repo>
 "gdiff · main · uncommitted · 1 file  +3 −3 · 0/1 reviewed · ◉ watching          "
 "┌Files (1)─────────────────────┐┌──────────────────────────────────────────────┐"
 "│  M big.txt                   ││big.txt  +3 −3  [1/1]                         │"
@@ -13,6 +14,5 @@ expression: "frame(&app, 80, 14)"
 "│                              ││   20 ▌ LINE20                               ││"
 "│                              ││21 21   line21                               ││"
 "│                              ││22 22   line22                               ││"
-"│                              ││23 23   line23                               ││"
 "└──────────────────────────────┘└──────────────────────────────────────────────┘"
 "j/k move  Tab focus  n/p file  ]/[ hunk  c compare  Space review  s split  / fin"

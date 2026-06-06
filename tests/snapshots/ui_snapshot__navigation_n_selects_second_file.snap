@@ -2,13 +2,13 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 14)"
 ---
+" Diff [1]   Files [2]   <repo>
 "gdiff · main · uncommitted · 2 files  +2 −2 · 0/2 reviewed · ◉ watching         "
 "┌Files (2)─────────────────────┐┌──────────────────────────────────────────────┐"
 "│  M a.txt                     ││z.txt  +1 −1  [2/2]                           │"
 "│  M z.txt                     ││@@ -1,1 +1,1 @@                               │"
 "│                              ││ 1    ▌ z                                     │"
 "│                              ││    1 ▌ z changed                             │"
-"│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"

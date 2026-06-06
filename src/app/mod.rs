@@ -2,6 +2,7 @@
 
 pub mod watcher;
 
+use crate::browser::Browser;
 use crate::config::{Config, ViewMode};
 use crate::diff::{engine, FileDiff};
 use crate::git::{base, CompareSpec, GitBackend, RepoContext};
@@ -26,6 +27,13 @@ const TICK: Duration = Duration::from_millis(250);
 pub enum Focus {
     Tree,
     Diff,
+}
+
+/// Top-level tab (gitui-style). `Diff` reviews changes; `Files` browses the repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Diff,
+    Files,
 }
 
 /// What a compare-picker entry does when chosen.
@@ -86,6 +94,10 @@ pub struct App {
     auto_refresh: bool,
     /// Light/dark rendering mode (resolved from config/terminal in `run`).
     theme_mode: ThemeMode,
+    /// The active top-level tab.
+    tab: Tab,
+    /// The Files-tab repo browser.
+    browser: Browser,
     /// Whether the help overlay is shown.
     show_help: bool,
     /// In-diff text search state (open when `Some`).
@@ -121,6 +133,7 @@ impl App {
         let review_path = ReviewState::state_path(&context.root);
         let review = ReviewState::load(&review_path);
         let auto_refresh = config.auto_refresh;
+        let browser = Browser::new(context.root.clone());
 
         let mut app = Self {
             config,
@@ -144,6 +157,8 @@ impl App {
             review_cache: Vec::new(),
             auto_refresh,
             theme_mode: ThemeMode::Dark,
+            tab: Tab::Diff,
+            browser,
             show_help: false,
             search: None,
             editor_request: None,
@@ -192,6 +207,12 @@ impl App {
     }
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         self.theme_mode = mode;
+    }
+    pub fn tab(&self) -> Tab {
+        self.tab
+    }
+    pub fn browser(&self) -> &Browser {
+        &self.browser
     }
 
     /// The comparison key under which review state is stored.
@@ -702,6 +723,38 @@ impl App {
             self.show_help = false;
             return;
         }
+
+        // Global keys (both tabs): quit, help, tab switching.
+        match key.code {
+            KeyCode::Char('q') => {
+                self.should_quit = true;
+                return;
+            }
+            KeyCode::Char('?') => {
+                self.show_help = true;
+                return;
+            }
+            KeyCode::Char('1') => {
+                self.tab = Tab::Diff;
+                self.picker = None;
+                self.search = None;
+                return;
+            }
+            KeyCode::Char('2') => {
+                self.tab = Tab::Files;
+                self.picker = None;
+                self.search = None;
+                return;
+            }
+            _ => {}
+        }
+
+        if self.tab == Tab::Files {
+            self.handle_files_key(key, ctrl);
+            return;
+        }
+
+        // ---- Diff tab ----
         // Search mode captures input while editing / navigating matches.
         if self.search_key(key) {
             return;
@@ -713,8 +766,6 @@ impl App {
         let half_page = (self.viewport.get() / 2).max(1);
 
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('?') => self.show_help = true,
             KeyCode::Char('/') => {
                 self.search = Some(Search {
                     query: String::new(),
@@ -766,6 +817,38 @@ impl App {
             KeyCode::Char('g') => self.scroll = 0,
             KeyCode::Char('G') => self.scroll = self.max_scroll(),
 
+            _ => {}
+        }
+    }
+
+    /// Key handling for the Files tab (repo browser + content viewer).
+    fn handle_files_key(&mut self, key: KeyEvent, ctrl: bool) {
+        match key.code {
+            KeyCode::Tab => {
+                self.focus = match self.focus {
+                    Focus::Tree => Focus::Diff,
+                    Focus::Diff => Focus::Tree,
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => match self.focus {
+                Focus::Tree => self.browser.cursor_down(),
+                Focus::Diff => self.browser.scroll_content_down(1),
+            },
+            KeyCode::Char('k') | KeyCode::Up => match self.focus {
+                Focus::Tree => self.browser.cursor_up(),
+                Focus::Diff => self.browser.scroll_content_up(1),
+            },
+            KeyCode::Char('d') if ctrl => self.browser.scroll_content_down(10),
+            KeyCode::Char('u') if ctrl => self.browser.scroll_content_up(10),
+            KeyCode::Enter => {
+                if self.browser.cursor_is_dir() {
+                    self.browser.toggle();
+                } else {
+                    self.focus = Focus::Diff; // focus the content pane
+                }
+            }
+            KeyCode::Right => self.browser.expand_or_open(),
+            KeyCode::Left => self.browser.collapse(),
             _ => {}
         }
     }

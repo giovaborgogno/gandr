@@ -2,10 +2,10 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 72, 18)"
 ---
-"gdiff · main · uncommitted · 1 file  +1 −1 · 0/1 reviewed · ◉ watching  "
-"┌Files┌Keys──────────────────────────────────────────────────────┐─────┐"
-"│  M a│ j / k, ↑ / ↓    move (tree) or scroll (diff)             │     │"
-"│     │ Tab             switch focus tree ↔ diff                 │     │"
+" Diff [1]   Files [2]   <repo>
+"gdiff ┌Keys──────────────────────────────────────────────────────┐hing  "
+"┌Files│ j / k, ↑ / ↓    move (tree) or scroll (diff)             │─────┐"
+"│  M a│ Tab             switch focus tree ↔ diff                 │     │"
 "│     │ n / p           next / previous file                     │     │"
 "│     │ ] / [           next / previous hunk                     │     │"
 "│     │ Enter, → / ←    expand / collapse tree; Enter on a file f│     │"

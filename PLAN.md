@@ -139,6 +139,17 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 
 ---
 
+## v2 — post-v1 roadmap (requested)
+
+- [ ] M8 — Tabs + repo file browser. gitui-style tab bar (`Diff [1] · Files [2]`).
+      New **Files** tab: lazy tree of the whole working tree (incl. git-ignored
+      files/folders; only `.git/` is skipped), selecting a file shows its content
+      syntax-highlighted.
+- [ ] M9 — Branch/ref picker: pick *and fuzzy-search* any branch/tag/commit to compare.
+- [ ] M10 — Search across all files (jump to file + match), not just the current file.
+- [ ] M11 — Expand context (`o`): reveal more lines around a hunk.
+- [ ] M12 — Multi-line syntax highlighting (carry syntect state across a file).
+
 ## Backlog / later (not v1)
 
 - **Branch/ref picker** — interactively pick *and search* any branch / tag / commit

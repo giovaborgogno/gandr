@@ -3,11 +3,12 @@
 //! Render functions take immutable [`App`] state and draw into a ratatui `Frame`
 //! with no I/O, so they're snapshot-testable on `TestBackend` (see docs/testing.md).
 
+pub mod browser;
 pub mod tree;
 pub mod viewer_split;
 pub mod viewer_unified;
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Tab};
 use crate::config::ViewMode;
 use crate::diff::FileDiff;
 use crate::highlight::{Highlighter, Palette};
@@ -35,10 +36,21 @@ const KEYBAR: &[(&str, &str)] = &[
     ("q", "quit"),
 ];
 
+/// Key hints for the Files tab.
+const KEYBAR_FILES: &[(&str, &str)] = &[
+    ("j/k", "move"),
+    ("Tab", "focus"),
+    ("Enter", "open/expand"),
+    ("←/→", "collapse/expand"),
+    ("1", "diff"),
+    ("?", "help"),
+    ("q", "quit"),
+];
+
 /// Build the styled keybar line: keys highlighted, labels dim.
-fn keybar_hints() -> Line<'static> {
-    let mut spans = Vec::with_capacity(KEYBAR.len() * 3);
-    for (i, (key, label)) in KEYBAR.iter().enumerate() {
+fn keybar_hints(items: &'static [(&'static str, &'static str)]) -> Line<'static> {
+    let mut spans = Vec::with_capacity(items.len() * 3);
+    for (i, (key, label)) in items.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("  ", Style::default()));
         }
@@ -84,31 +96,104 @@ fn border_style(focused: bool) -> Style {
     }
 }
 
-/// Draw the whole frame.
+/// Draw the whole frame: tab bar, status line, body (per tab), keybar.
 pub fn render(app: &App, f: &mut Frame) {
-    let [header, body, keybar] = Layout::vertical([
+    let [tabbar, status, body, keybar] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .areas(f.area());
 
+    render_tabbar(app, f, tabbar);
     f.render_widget(
         Paragraph::new(Span::styled(
-            app.header_line(),
+            status_line(app),
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        header,
+        status,
     );
 
-    let [tree_area, viewer] =
-        Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)]).areas(body);
+    match app.tab() {
+        Tab::Diff => {
+            let [tree_area, viewer] =
+                Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)])
+                    .areas(body);
+            render_file_list(app, f, tree_area);
+            render_viewer(app, f, viewer);
+        }
+        Tab::Files => browser::render(app, f, body),
+    }
 
-    render_file_list(app, f, tree_area);
-    render_viewer(app, f, viewer);
+    f.render_widget(Paragraph::new(keybar_line(app)), keybar);
 
-    // The keybar doubles as the search prompt / error line.
-    let keybar_line = match (app.search(), app.error_message()) {
+    if let Some(picker) = app.picker() {
+        render_picker(f, f.area(), picker);
+    }
+    if app.show_help() {
+        render_help(f, f.area());
+    }
+}
+
+/// The gitui-style tab bar: `Diff [1]  Files [2]` left, repo path right.
+fn render_tabbar(app: &App, f: &mut Frame, area: Rect) {
+    let tabs = [(Tab::Diff, "Diff", '1'), (Tab::Files, "Files", '2')];
+    let mut spans = vec![Span::raw(" ")];
+    let mut tabs_w = 1usize;
+    for (tab, label, num) in tabs {
+        let active = app.tab() == tab;
+        let style = if active {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let text = format!("{label} [{num}]");
+        tabs_w += text.chars().count() + 3;
+        spans.push(Span::styled(text, style));
+        spans.push(Span::raw("   "));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+
+    // Repo path to the right of the tabs, truncated (keeping the tail) to fit.
+    let w = area.width as usize;
+    if w > tabs_w + 4 {
+        let avail = w - tabs_w;
+        let root = app.context().root.to_string_lossy();
+        let mut path = format!("{root} ");
+        if path.chars().count() > avail {
+            let tail: String = path.chars().rev().take(avail - 1).collect();
+            path = format!("…{}", tail.chars().rev().collect::<String>());
+        }
+        let pad = avail.saturating_sub(path.chars().count());
+        let right = Rect {
+            x: area.x + (tabs_w + pad) as u16,
+            width: (avail - pad) as u16,
+            ..area
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(path, Style::default().fg(Color::DarkGray))),
+            right,
+        );
+    }
+}
+
+/// The per-tab status line.
+fn status_line(app: &App) -> String {
+    match app.tab() {
+        Tab::Diff => app.header_line(),
+        Tab::Files => match app.browser().loaded() {
+            Some(l) => format!("Files · {}", l.path.display()),
+            None => "Files · browsing the whole repo (including ignored)".to_string(),
+        },
+    }
+}
+
+/// The keybar line (search prompt / error / per-tab hints).
+fn keybar_line(app: &App) -> Line<'static> {
+    match (app.search(), app.error_message()) {
         (Some(s), _) if s.editing => Line::from(Span::styled(
             format!("/{}", s.query),
             Style::default().fg(Color::Yellow),
@@ -121,15 +206,10 @@ pub fn render(app: &App, f: &mut Frame) {
             format!("⚠ {err}"),
             Style::default().fg(Color::Red),
         )),
-        (None, None) => keybar_hints(),
-    };
-    f.render_widget(Paragraph::new(keybar_line), keybar);
-
-    if let Some(picker) = app.picker() {
-        render_picker(f, f.area(), picker);
-    }
-    if app.show_help() {
-        render_help(f, f.area());
+        (None, None) => match app.tab() {
+            Tab::Diff => keybar_hints(KEYBAR),
+            Tab::Files => keybar_hints(KEYBAR_FILES),
+        },
     }
 }
 

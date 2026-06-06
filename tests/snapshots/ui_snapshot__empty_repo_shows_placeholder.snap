@@ -2,10 +2,10 @@
 source: tests/ui_snapshot.rs
 expression: "frame(&app, 80, 12)"
 ---
+" Diff [1]   Files [2]   <repo>
 "gdiff · main · uncommitted · 0 files  +0 −0 · 0/0 reviewed · ◉ watching         "
 "┌Files (0)─────────────────────┐┌──────────────────────────────────────────────┐"
 "│                              ││No uncommitted changes. Press `c` to compare a│"
-"│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"
 "│                              ││                                              │"

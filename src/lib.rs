@@ -5,6 +5,7 @@
 //! Nothing depends back upward; the UI never touches `git2` directly.
 
 pub mod app;
+pub mod browser;
 pub mod cli;
 pub mod config;
 pub mod diff;
