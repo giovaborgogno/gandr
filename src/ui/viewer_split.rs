@@ -81,6 +81,7 @@ fn cell_rows(
     hl: &Highlighter,
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) -> Vec<Vec<Span<'static>>> {
     let text_w = side_w.saturating_sub(gutter_w + 1).max(1);
     let Some(line) = line else {
@@ -88,8 +89,15 @@ fn cell_rows(
     };
 
     let fg = hl.fg_spans(&line.text);
-    let composed =
-        compose::line_spans(&line.text, line.kind, &line.segments, &fg, palette, word_on);
+    let composed = compose::line_spans(
+        &line.text,
+        line.kind,
+        &line.segments,
+        &fg,
+        palette,
+        word_on,
+        query,
+    );
     let wrapped = wrap_spans(&composed, text_w);
     let num = if line.kind == LineKind::Del {
         line.old_no
@@ -169,6 +177,7 @@ pub fn rows(
     hl: &Highlighter,
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) -> Vec<Line<'static>> {
     let gutter_w = gutter_width(file);
     let side_w = width.saturating_sub(1) / 2;
@@ -181,8 +190,8 @@ pub fn rows(
         )));
 
         for (left, right) in pair_rows(hunk) {
-            let left_rows = cell_rows(left, side_w, gutter_w, hl, palette, word_on);
-            let right_rows = cell_rows(right, side_w, gutter_w, hl, palette, word_on);
+            let left_rows = cell_rows(left, side_w, gutter_w, hl, palette, word_on, query);
+            let right_rows = cell_rows(right, side_w, gutter_w, hl, palette, word_on, query);
             let height = left_rows.len().max(right_rows.len());
 
             for k in 0..height {
@@ -205,6 +214,7 @@ pub fn rows(
 }
 
 /// Render the side-by-side diff for `file` into `area`, scrolled to `scroll`.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
@@ -213,13 +223,14 @@ pub fn render(
     hl: &Highlighter,
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) {
     // Reserve the rightmost column for the scrollbar.
     let content = Rect {
         width: area.width.saturating_sub(1),
         ..area
     };
-    let all = rows(file, content.width as usize, hl, palette, word_on);
+    let all = rows(file, content.width as usize, hl, palette, word_on, query);
     let total = all.len();
     let height = area.height as usize;
     let effective = scroll.min(total.saturating_sub(height));

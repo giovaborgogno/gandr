@@ -277,6 +277,26 @@ fn search_jumps_to_match() {
 }
 
 #[test]
+fn search_highlights_matches() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "alpha\n");
+    fx.commit("init");
+    fx.write("a.txt", "alpha beta\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('/'));
+    for c in "beta".chars() {
+        app.handle_key(key(c));
+    }
+    // Matched text gets a yellow background.
+    let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+    let completed = terminal.draw(|f| app.render(f)).unwrap();
+    let buf = completed.buffer;
+    let found = (0..buf.area.height)
+        .any(|y| (0..buf.area.width).any(|x| buf.cell((x, y)).unwrap().bg == Color::Yellow));
+    assert!(found, "expected a yellow search-match background");
+}
+
+#[test]
 fn help_overlay() {
     let fx = Fixture::new();
     fx.write("a.txt", "x\n");

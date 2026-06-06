@@ -4,11 +4,36 @@
 
 use super::{FgSpan, Palette};
 use crate::diff::{LineKind, Segment};
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use std::collections::BTreeSet;
 
-/// Build the styled spans for a line's text content.
+/// Byte ranges of ASCII-case-insensitive occurrences of `query` in `text`.
+/// ASCII case-folding preserves byte offsets, so the ranges are char-aligned.
+pub fn match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
+    let hay = text.as_bytes().to_ascii_lowercase();
+    let needle = query.as_bytes().to_ascii_lowercase();
+    if needle.is_empty() || needle.len() > hay.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + needle.len() <= hay.len() {
+        if hay[i..i + needle.len()] == needle[..] {
+            let end = i + needle.len();
+            if text.is_char_boundary(i) && text.is_char_boundary(end) {
+                out.push((i, end));
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Build the styled spans for a line's text content. When `query` is set, its
+/// occurrences are highlighted (yellow) on top of everything else.
 pub fn line_spans(
     text: &str,
     kind: LineKind,
@@ -16,6 +41,7 @@ pub fn line_spans(
     fg: &[FgSpan],
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) -> Vec<Span<'static>> {
     if text.is_empty() {
         return Vec::new();
@@ -26,9 +52,13 @@ pub fn line_spans(
         LineKind::Del => (Some(palette.del_bg), Some(palette.del_strong_bg)),
         LineKind::Context => (None, None),
     };
+    let matches = match query {
+        Some(q) if !q.is_empty() => match_ranges(text, q),
+        _ => Vec::new(),
+    };
 
-    // Cut the line at every fg-span and segment boundary; each resulting slice
-    // has a single (fg, bg) style.
+    // Cut the line at every fg-span, segment and match boundary; each resulting
+    // slice has a single (fg, bg) style.
     let len = text.len();
     let mut bounds = BTreeSet::new();
     bounds.insert(0);
@@ -41,6 +71,10 @@ pub fn line_spans(
         bounds.insert(s.start.min(len));
         bounds.insert(s.end.min(len));
     }
+    for (s, e) in &matches {
+        bounds.insert(*s);
+        bounds.insert(*e);
+    }
     let points: Vec<usize> = bounds.into_iter().collect();
 
     let mut spans = Vec::with_capacity(points.len());
@@ -49,21 +83,51 @@ pub fn line_spans(
         if a >= b {
             continue;
         }
-        let color = fg
-            .iter()
-            .find(|s| s.start <= a && a < s.end)
-            .map(|s| s.color);
-        let changed = word_on && segments.iter().any(|s| s.start <= a && a < s.end);
-        let bg = if changed { strong_bg } else { base_bg };
+        let in_match = matches.iter().any(|&(s, e)| s <= a && a < e);
 
-        let mut style = Style::default();
-        if let Some(c) = color {
-            style = style.fg(c);
-        }
-        if let Some(bg) = bg {
-            style = style.bg(bg);
-        }
+        let style = if in_match {
+            // Search highlight wins over syntax/diff styling.
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            let color = fg
+                .iter()
+                .find(|s| s.start <= a && a < s.end)
+                .map(|s| s.color);
+            let changed = word_on && segments.iter().any(|s| s.start <= a && a < s.end);
+            let bg = if changed { strong_bg } else { base_bg };
+            let mut style = Style::default();
+            if let Some(c) = color {
+                style = style.fg(c);
+            }
+            if let Some(bg) = bg {
+                style = style.bg(bg);
+            }
+            style
+        };
         spans.push(Span::styled(text[a..b].to_string(), style));
     }
     spans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::match_ranges;
+
+    #[test]
+    fn finds_case_insensitive_occurrences() {
+        assert_eq!(
+            match_ranges("let Greeting = greeting;", "greeting"),
+            vec![(4, 12), (15, 23)]
+        );
+    }
+
+    #[test]
+    fn no_match_returns_empty() {
+        assert!(match_ranges("hello world", "xyz").is_empty());
+        assert!(match_ranges("short", "longer than text").is_empty());
+        assert!(match_ranges("anything", "").is_empty());
+    }
 }

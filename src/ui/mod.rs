@@ -271,13 +271,32 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     let hl = Highlighter::for_path(&file.change.path, mode);
     let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
+    // Highlight search matches in the diff while a (non-empty) query is active.
+    let query = app
+        .search()
+        .map(|s| s.query.as_str())
+        .filter(|q| !q.is_empty());
     match app.view() {
-        ViewMode::Unified => {
-            viewer_unified::render(f, diff_body, file, app.scroll(), &hl, &palette, word_on)
-        }
-        ViewMode::SideBySide => {
-            viewer_split::render(f, diff_body, file, app.scroll(), &hl, &palette, word_on)
-        }
+        ViewMode::Unified => viewer_unified::render(
+            f,
+            diff_body,
+            file,
+            app.scroll(),
+            &hl,
+            &palette,
+            word_on,
+            query,
+        ),
+        ViewMode::SideBySide => viewer_split::render(
+            f,
+            diff_body,
+            file,
+            app.scroll(),
+            &hl,
+            &palette,
+            word_on,
+            query,
+        ),
     }
 }
 

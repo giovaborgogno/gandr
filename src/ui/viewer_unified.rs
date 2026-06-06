@@ -41,6 +41,7 @@ pub fn rows(
     hl: &Highlighter,
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) -> Vec<Line<'static>> {
     let w = gutter_width(file);
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -66,8 +67,15 @@ pub fn rows(
             ];
 
             let fg = hl.fg_spans(&line.text);
-            let text_spans =
-                compose::line_spans(&line.text, line.kind, &line.segments, &fg, palette, word_on);
+            let text_spans = compose::line_spans(
+                &line.text,
+                line.kind,
+                &line.segments,
+                &fg,
+                palette,
+                word_on,
+                query,
+            );
             spans.extend(text_spans);
 
             // Fill the rest of the row with the base background, delta-style.
@@ -89,6 +97,7 @@ pub fn rows(
 ///
 /// `scroll` is clamped to the last full screen so a stale/over-large value still
 /// shows content rather than a blank panel.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
@@ -97,13 +106,14 @@ pub fn render(
     hl: &Highlighter,
     palette: &Palette,
     word_on: bool,
+    query: Option<&str>,
 ) {
     // Reserve the rightmost column for the scrollbar.
     let content = Rect {
         width: area.width.saturating_sub(1),
         ..area
     };
-    let all = rows(file, content.width as usize, hl, palette, word_on);
+    let all = rows(file, content.width as usize, hl, palette, word_on, query);
     let total = all.len();
     let height = area.height as usize;
     let effective = scroll.min(total.saturating_sub(height));
