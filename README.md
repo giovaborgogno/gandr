@@ -8,6 +8,11 @@ exploring the rest of the codebase without leaving your terminal.
 
 ![gandr in action](https://github.com/user-attachments/assets/766c2fca-513c-4b36-9702-00eb565a49c9)
 
+*Built for reviewing an AI agent's work — live. As Claude Code (left) edits, the changes
+stream into gandr (right): review the diff and search the whole repo without breaking flow.*
+
+![gandr reviewing an agent's changes live](https://github.com/user-attachments/assets/c33a56db-5d6f-49bb-a750-cfac1cf37115)
+
 > Status: feature-complete and stable. Two tabs — a **Diff** reviewer and a
 > **Repo** browser — with live refresh, review tracking, and repo-wide search.
 > A few DX extras are backlogged (config-file loading, copy, mouse) — see `PLAN.md`.
