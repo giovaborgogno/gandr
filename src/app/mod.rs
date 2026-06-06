@@ -963,29 +963,89 @@ impl App {
             .collect()
     }
 
-    /// Move the cursor to the next/previous search match (wrapping). The cursor
-    /// highlight marks which match you're on.
+    /// Display-row offsets matching the query in an arbitrary file's folded diff
+    /// (computed fresh — used to search files other than the selected one).
+    fn matches_in_file(&self, idx: usize, query_lower: &str) -> Vec<usize> {
+        let Some(file) = self.files.get(idx) else {
+            return Vec::new();
+        };
+        let full = engine::all_lines(&file.old_text, &file.new_text);
+        let rows = fold::fold(&full, self.config.context_lines, &HashMap::new());
+        rows.iter()
+            .enumerate()
+            .filter_map(|(i, row)| match row {
+                DiffRow::Line(li) if full[*li].text.to_lowercase().contains(query_lower) => Some(i),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Select file `idx`: point the viewer and tree cursor at it and reset the
+    /// diff cursor (so a fresh display is computed for it).
+    fn select_file(&mut self, idx: usize) {
+        self.selected = idx;
+        if let Some(c) = self
+            .tree_rows()
+            .iter()
+            .position(|r| r.file_index() == Some(idx))
+        {
+            self.tree_cursor = c;
+        }
+        self.reset_diff_view();
+    }
+
+    /// Move the cursor to the next/previous search match, across ALL changed
+    /// files (wrapping). The cursor highlight marks which match you're on.
     fn search_jump(&mut self, forward: bool) {
-        let matches = self.search_matches();
-        if matches.is_empty() {
+        let query = match &self.search {
+            Some(s) if !s.query.trim().is_empty() => s.query.to_lowercase(),
+            _ => return,
+        };
+        let n = self.files.len();
+        if n == 0 {
             return;
         }
-        let cur = self.diff_cursor;
-        let target = if forward {
-            matches
-                .iter()
-                .find(|&&o| o > cur)
-                .or_else(|| matches.first())
+        // 1) Within the current file, the next match past the cursor.
+        let here = self.search_matches();
+        let in_here = if forward {
+            here.iter().find(|&&o| o > self.diff_cursor).copied()
         } else {
-            matches
-                .iter()
-                .rev()
-                .find(|&&o| o < cur)
-                .or_else(|| matches.last())
+            here.iter().rev().find(|&&o| o < self.diff_cursor).copied()
         };
-        if let Some(&off) = target {
+        if let Some(off) = in_here {
             self.diff_cursor = off.min(self.last_diff_row());
             self.anchor_cursor_near_top();
+            return;
+        }
+        // 2) Other files in order (wrapping back through the current one), first
+        //    match in each — so n/N traverse the whole diff, not just one file.
+        let others: Vec<usize> = if forward {
+            (self.selected + 1..n).chain(0..=self.selected).collect()
+        } else {
+            (0..self.selected)
+                .rev()
+                .chain((self.selected..n).rev())
+                .collect()
+        };
+        for idx in others {
+            let matches = if idx == self.selected {
+                here.clone()
+            } else {
+                self.matches_in_file(idx, &query)
+            };
+            let target = if forward {
+                matches.first().copied()
+            } else {
+                matches.last().copied()
+            };
+            if let Some(off) = target {
+                if idx != self.selected {
+                    self.select_file(idx);
+                }
+                self.diff_cursor = off.min(self.last_diff_row());
+                self.anchor_cursor_near_top();
+                return;
+            }
         }
     }
 

@@ -279,6 +279,33 @@ fn search_jumps_to_match() {
 }
 
 #[test]
+fn diff_search_crosses_files() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.write("z.txt", "x\n");
+    fx.commit("init");
+    // Both files change to contain the same term.
+    fx.write("a.txt", "needle\n");
+    fx.write("z.txt", "needle\n");
+    let mut app = app_from(&fx);
+    let _ = frame(&app, 80, 14);
+
+    app.handle_key(key('/'));
+    for c in "needle".chars() {
+        app.handle_key(key(c));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let first = app.current().unwrap().change.path.clone();
+    // The first file has a single match → n crosses into the other file.
+    app.handle_key(key('n'));
+    let second = app.current().unwrap().change.path.clone();
+    assert_ne!(first, second, "n should cross to the next file's match");
+    // n again wraps back to the first file.
+    app.handle_key(key('n'));
+    assert_eq!(app.current().unwrap().change.path, first);
+}
+
+#[test]
 fn search_highlights_matches() {
     let fx = Fixture::new();
     fx.write("a.txt", "alpha\n");

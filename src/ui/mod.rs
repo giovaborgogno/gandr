@@ -404,7 +404,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("o", "context window 3→10→30→100"),
         ("Space", "mark reviewed"),
         ("c / b", "compare · branch/tag picker"),
-        ("/", "find (n / N to navigate)"),
+        ("/", "find across all files (n / N)"),
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),
         ("1 / 2", "Diff / Files tab"),
