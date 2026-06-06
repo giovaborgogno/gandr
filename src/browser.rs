@@ -217,6 +217,40 @@ impl Browser {
         }
     }
 
+    /// Reveal `path` (an absolute path under the root): expand its ancestor
+    /// directories, move the cursor onto it, load it, and — for a content hit —
+    /// scroll the preview so `line` (1-based) sits near the top. Used to jump to
+    /// a repo-search result.
+    pub fn reveal(&mut self, path: &Path, line: Option<usize>) {
+        let mut dir = path.parent();
+        while let Some(d) = dir {
+            if d == self.root {
+                break;
+            }
+            if d.starts_with(&self.root) {
+                self.expanded.insert(d.to_path_buf());
+            }
+            dir = d.parent();
+        }
+        self.invalidate();
+
+        if let Some(idx) = self.rows().iter().position(|r| r.path == path) {
+            self.cursor = idx;
+            self.load_selection();
+            // `load_selection` resets the scroll; place the match near the top,
+            // clamped to the file we actually loaded (only after a successful
+            // load, so a missing row never scrolls the previously-shown file).
+            if let Some(l) = line {
+                let max = self
+                    .loaded
+                    .as_ref()
+                    .map(|f| f.lines.len().saturating_sub(1))
+                    .unwrap_or(0);
+                self.content_scroll = l.saturating_sub(1).min(max);
+            }
+        }
+    }
+
     pub fn scroll_content_down(&mut self, n: usize) {
         let max = self
             .loaded

@@ -146,7 +146,8 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       files/folders; only `.git/` is skipped), selecting a file shows its content
       syntax-highlighted.
 - [ ] M9 — Branch/ref picker: pick *and fuzzy-search* any branch/tag/commit to compare.
-- [ ] M10 — Search across all files (jump to file + match), not just the current file.
+- [x] M10 — Search across all files (jump to file + match), not just the current file.
+      *Delivered by M14 (the repo-wide content search jumps to file + line).*
 - [ ] M11 — Expand context (`o`): reveal more lines around a hunk.
 - [ ] M12 — Multi-line syntax highlighting (carry syntect state across a file).
 - [ ] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
@@ -155,19 +156,22 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       loop (terminal input + job results + file-watch on one channel). Heavy
       work (diff recompute, file load, search) runs off the UI thread; results
       post back as events. Initial diff stays sync (fast startup + tests).
-- [ ] M14 — **Repo-wide search via embedded crates**: `ignore` for file-name
+- [x] M14 — **Repo-wide search via embedded crates**: `ignore` for file-name
       search (fd-style, respects .gitignore) and `grep`/`grep-searcher` for
       content search (ripgrep-style) — no external binaries. Search runs async
-      (M13). `/` becomes: in-diff (current), file-name (Files tab), and
-      repo content search with a results list that jumps to file + line.
+      (M13). `/` is now: in-diff (Diff tab) + repo-wide (Files tab) with a
+      results list that jumps to file + line; `Tab` flips file-name ↔ content.
+      Walk is sorted (deterministic) and capped at `search::MAX_RESULTS` (500).
 
 ## Backlog / later (not v1)
 
 - **Branch/ref picker** — interactively pick *and search* any branch / tag / commit
   to compare against (the compare picker currently offers only Uncommitted, Staged,
   the auto-detected base, and the PR). A fuzzy list of refs would close this.
-- **Search across all files** — `/` currently searches only the current file's diff;
-  a project-wide search that jumps to file+match would help on big changesets.
+- ~~**Search across all files**~~ — done in M14 (Files-tab `/` searches names + content
+  repo-wide and jumps to file+line). A possible follow-up: debounce keystrokes so a
+  broad query on a huge repo doesn't spawn a walk per character (the epoch already
+  drops stale results, so it's a CPU optimization, not a correctness issue).
 - **Multi-line syntax highlighting** — highlighting is per-line, so block comments /
   multi-line strings aren't tracked; carry syntect state across a file's lines.
 - **Config-file loading** (`~/.config/gdiff/config.toml` + per-repo `.gdiff.toml`,

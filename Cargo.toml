@@ -38,6 +38,12 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Repo-wide search: `ignore` walks the tree respecting .gitignore (fd-style file
+# search); `grep` is ripgrep's engine for content search. No external binaries.
+ignore = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+
 # Temp git repos for the `testutil` fixture helper (used by tests + examples,
 # never by the binary's real code path).
 tempfile = "3"

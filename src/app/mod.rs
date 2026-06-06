@@ -9,6 +9,7 @@ use crate::diff::{engine, FileDiff};
 use crate::git::{base, CompareSpec, GitBackend, RepoContext};
 use crate::highlight::ThemeMode;
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
+use crate::search::{SearchMode, SearchResults};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
 use anyhow::{Context as _, Result};
@@ -105,9 +106,26 @@ pub struct App {
     show_help: bool,
     /// In-diff text search state (open when `Some`).
     search: Option<Search>,
+    /// Repo-wide search overlay (Files tab), open when `Some`.
+    repo_search: Option<RepoSearch>,
+    /// Monotonic token; a background search result is applied only if it matches.
+    search_epoch: u64,
+    /// A queued async search the event loop should spawn: (epoch, query, mode).
+    pending_search: Option<(u64, String, SearchMode)>,
     /// A pending "open in editor" request (path, 1-based line), taken by run_loop.
     editor_request: Option<(PathBuf, u32)>,
     should_quit: bool,
+}
+
+/// Repo-wide search (Files tab): a live query over file names or contents, with
+/// a results list you navigate (↑/↓) and jump into (Enter). `Tab` flips the mode.
+pub struct RepoSearch {
+    pub query: String,
+    pub mode: SearchMode,
+    pub results: SearchResults,
+    pub selected: usize,
+    /// Whether a background search for the current query is in flight.
+    pub loading: bool,
 }
 
 /// In-diff search: the query and the current match's row offset.
@@ -167,6 +185,9 @@ impl App {
             browser,
             show_help: false,
             search: None,
+            repo_search: None,
+            search_epoch: 0,
+            pending_search: None,
             editor_request: None,
             should_quit: false,
         };
@@ -570,6 +591,9 @@ impl App {
     pub fn search(&self) -> Option<&Search> {
         self.search.as_ref()
     }
+    pub fn repo_search(&self) -> Option<&RepoSearch> {
+        self.repo_search.as_ref()
+    }
     /// Take a pending editor request (path, 1-based line), if any.
     pub fn take_editor_request(&mut self) -> Option<(PathBuf, u32)> {
         self.editor_request.take()
@@ -670,6 +694,139 @@ impl App {
         }
     }
 
+    // ---- repo-wide search (Files tab) ----
+
+    /// Empty results matching `mode` (so the overlay knows which list it shows).
+    fn empty_results(mode: SearchMode) -> SearchResults {
+        match mode {
+            SearchMode::Files => SearchResults::Files(Vec::new()),
+            SearchMode::Content => SearchResults::Content(Vec::new()),
+        }
+    }
+
+    /// Open the repo-wide search overlay (defaults to content search).
+    fn open_repo_search(&mut self) {
+        let mode = SearchMode::Content;
+        self.repo_search = Some(RepoSearch {
+            query: String::new(),
+            mode,
+            results: Self::empty_results(mode),
+            selected: 0,
+            loading: false,
+        });
+    }
+
+    /// Queue an async search for the current query/mode (or clear results when
+    /// the query is empty). The event loop spawns the background job.
+    fn request_search(&mut self) {
+        let Some(rs) = self.repo_search.as_ref() else {
+            return;
+        };
+        let query = rs.query.clone();
+        let mode = rs.mode;
+        self.search_epoch += 1;
+        let epoch = self.search_epoch;
+        if query.trim().is_empty() {
+            self.pending_search = None;
+            if let Some(rs) = self.repo_search.as_mut() {
+                rs.results = Self::empty_results(mode);
+                rs.loading = false;
+                rs.selected = 0;
+            }
+            return;
+        }
+        self.pending_search = Some((epoch, query, mode));
+        if let Some(rs) = self.repo_search.as_mut() {
+            rs.loading = true;
+        }
+    }
+
+    /// Take a queued search request for the loop to spawn.
+    pub fn take_pending_search(&mut self) -> Option<(u64, String, SearchMode)> {
+        self.pending_search.take()
+    }
+
+    /// Apply a background search result, ignoring it if a newer query superseded it.
+    pub fn apply_search_result(&mut self, epoch: u64, results: SearchResults) {
+        if epoch != self.search_epoch {
+            return; // stale; a newer query is in flight
+        }
+        if let Some(rs) = self.repo_search.as_mut() {
+            rs.results = results;
+            rs.loading = false;
+            rs.selected = 0;
+        }
+    }
+
+    /// Move the selection within the results list.
+    fn result_move(&mut self, down: bool) {
+        if let Some(rs) = self.repo_search.as_mut() {
+            let len = rs.results.len();
+            if len == 0 {
+                return;
+            }
+            rs.selected = if down {
+                (rs.selected + 1).min(len - 1)
+            } else {
+                rs.selected.saturating_sub(1)
+            };
+        }
+    }
+
+    /// Jump to the selected result: reveal it in the browser (at its line for a
+    /// content hit), focus the content pane, and close the overlay.
+    fn jump_to_result(&mut self) {
+        let root = self.context.root.clone();
+        let target = self.repo_search.as_ref().and_then(|rs| match &rs.results {
+            SearchResults::Files(v) => v.get(rs.selected).map(|p| (root.join(p), None)),
+            SearchResults::Content(v) => v
+                .get(rs.selected)
+                .map(|m| (root.join(&m.path), Some(m.line as usize))),
+        });
+        if let Some((abs, line)) = target {
+            self.browser.reveal(&abs, line);
+            self.focus = Focus::Diff; // focus the content pane
+            self.repo_search = None;
+            self.pending_search = None;
+        }
+    }
+
+    /// Route a key to the open repo-search overlay; returns whether it was handled.
+    fn repo_search_key(&mut self, key: KeyEvent) -> bool {
+        if self.repo_search.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.repo_search = None;
+                self.pending_search = None;
+            }
+            KeyCode::Tab => {
+                if let Some(rs) = self.repo_search.as_mut() {
+                    rs.mode = rs.mode.toggled();
+                }
+                self.request_search();
+            }
+            KeyCode::Up => self.result_move(false),
+            KeyCode::Down => self.result_move(true),
+            KeyCode::Enter => self.jump_to_result(),
+            KeyCode::Backspace => {
+                if let Some(rs) = self.repo_search.as_mut() {
+                    rs.query.pop();
+                }
+                self.request_search();
+            }
+            KeyCode::Char(c) => {
+                if let Some(rs) = self.repo_search.as_mut() {
+                    rs.query.push(c);
+                }
+                self.request_search();
+            }
+            _ => {}
+        }
+        true
+    }
+
     fn open_picker(&mut self) {
         let mut items = vec![
             PickerItem {
@@ -755,6 +912,12 @@ impl App {
             return;
         }
 
+        // The repo-search overlay (Files tab) captures all keys while open, so
+        // typing the query isn't intercepted by the global single-key shortcuts.
+        if self.repo_search_key(key) {
+            return;
+        }
+
         // Global keys (both tabs): quit, help, tab switching.
         match key.code {
             KeyCode::Char('q') => {
@@ -769,12 +932,16 @@ impl App {
                 self.tab = Tab::Diff;
                 self.picker = None;
                 self.search = None;
+                self.repo_search = None;
+                self.pending_search = None;
                 return;
             }
             KeyCode::Char('2') => {
                 self.tab = Tab::Files;
                 self.picker = None;
                 self.search = None;
+                self.repo_search = None;
+                self.pending_search = None;
                 return;
             }
             _ => {}
@@ -855,6 +1022,7 @@ impl App {
     /// Key handling for the Files tab (repo browser + content viewer).
     fn handle_files_key(&mut self, key: KeyEvent, ctrl: bool) {
         match key.code {
+            KeyCode::Char('/') => self.open_repo_search(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,
@@ -955,6 +1123,13 @@ fn run_loop(
             continue;
         }
 
+        // Spawn any queued async repo-wide search (Files tab).
+        if let Some((epoch, query, mode)) = app.take_pending_search() {
+            jobs::spawn_search(tx.clone(), root.to_path_buf(), query, mode, epoch);
+            dirty = true;
+            continue;
+        }
+
         match rx.recv() {
             Ok(jobs::AppEvent::Term(Event::Key(key))) => {
                 app.handle_key(key);
@@ -969,6 +1144,10 @@ fn run_loop(
             }
             Ok(jobs::AppEvent::DiffReady { epoch, files }) => {
                 app.apply_diff_result(epoch, files);
+                dirty = true;
+            }
+            Ok(jobs::AppEvent::SearchReady { epoch, results }) => {
+                app.apply_search_result(epoch, results);
                 dirty = true;
             }
             // The input thread holds a sender for the whole run, so recv only

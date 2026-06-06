@@ -11,6 +11,7 @@ use crate::diff::engine;
 use crate::diff::FileDiff;
 use crate::git::git2_backend::Git2Backend;
 use crate::git::CompareSpec;
+use crate::search::{self, SearchMode, SearchResults};
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use crossterm::event::Event as TermEvent;
@@ -27,6 +28,8 @@ pub enum AppEvent {
     },
     /// The working tree changed (from the file watcher).
     FileChanged,
+    /// A background repo-wide search finished (tagged with the requesting epoch).
+    SearchReady { epoch: u64, results: SearchResults },
 }
 
 /// Forward terminal input on a background thread so the UI loop can block on a
@@ -54,5 +57,20 @@ pub fn spawn_diff(
         let files = Git2Backend::open(&root)
             .and_then(|backend| engine::build_diffs(&backend, &spec, context));
         let _ = tx.send(AppEvent::DiffReady { epoch, files });
+    });
+}
+
+/// Run a repo-wide search on a background thread, posting results tagged `epoch`.
+/// Stale results (a newer query was typed) are dropped by the UI via the epoch.
+pub fn spawn_search(
+    tx: Sender<AppEvent>,
+    root: PathBuf,
+    query: String,
+    mode: SearchMode,
+    epoch: u64,
+) {
+    std::thread::spawn(move || {
+        let results = search::run(&root, &query, mode);
+        let _ = tx.send(AppEvent::SearchReady { epoch, results });
     });
 }

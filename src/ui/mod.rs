@@ -42,6 +42,7 @@ const KEYBAR_FILES: &[(&str, &str)] = &[
     ("Tab", "focus"),
     ("Enter", "open/expand"),
     ("←/→", "collapse/expand"),
+    ("/", "search repo"),
     ("1", "diff"),
     ("?", "help"),
     ("q", "quit"),
@@ -131,9 +132,94 @@ pub fn render(app: &App, f: &mut Frame) {
     if let Some(picker) = app.picker() {
         render_picker(f, f.area(), picker);
     }
+    if let Some(rs) = app.repo_search() {
+        render_repo_search(f, f.area(), rs);
+    }
     if app.show_help() {
         render_help(f, f.area());
     }
+}
+
+/// Draw the repo-wide search overlay (Files tab): a query line over a scrollable,
+/// selectable results list (file names or content hits).
+fn render_repo_search(f: &mut Frame, area: Rect, rs: &crate::app::RepoSearch) {
+    use crate::search::SearchResults;
+
+    let width = area.width.saturating_sub(4).clamp(1, 100);
+    let height = area.height.saturating_sub(2).clamp(3, 24);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    let loading = if rs.loading { " · …" } else { "" };
+    let title = format!(
+        "Search [{}] · {} results{} · Tab: switch mode",
+        rs.mode.label(),
+        rs.results.len(),
+        loading
+    );
+    let block = Block::bordered()
+        .title(title)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup);
+    f.render_widget(ratatui::widgets::Clear, popup);
+    f.render_widget(block, popup);
+
+    let [query_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::DarkGray)),
+            Span::styled(rs.query.clone(), Style::default().fg(Color::Yellow)),
+        ])),
+        query_area,
+    );
+
+    let rows = list_area.height as usize;
+    let cols = list_area.width as usize;
+    // Keep the selected result on-screen.
+    let scroll = rs.selected.saturating_sub(rows.saturating_sub(1));
+    let mut lines: Vec<Line> = Vec::new();
+    match &rs.results {
+        SearchResults::Files(v) => {
+            for (i, p) in v.iter().enumerate().skip(scroll).take(rows) {
+                lines.push(result_line(
+                    i == rs.selected,
+                    p.to_string_lossy().into_owned(),
+                    cols,
+                ));
+            }
+        }
+        SearchResults::Content(v) => {
+            for (i, m) in v.iter().enumerate().skip(scroll).take(rows) {
+                let text = format!("{}:{}  {}", m.path.display(), m.line, m.text.trim_start());
+                lines.push(result_line(i == rs.selected, text, cols));
+            }
+        }
+    }
+    f.render_widget(Paragraph::new(lines), list_area);
+}
+
+/// One results-list row: selection-highlighted, truncated, padded to full width.
+fn result_line(selected: bool, text: String, width: usize) -> Line<'static> {
+    let style = if selected {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    let truncated: String = text.chars().take(width).collect();
+    let used = truncated.chars().count();
+    let mut spans = vec![Span::styled(truncated, style)];
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), style));
+    }
+    Line::from(spans)
 }
 
 /// The gitui-style tab bar: `Diff [1]  Files [2]` left, repo path right.
@@ -193,6 +279,12 @@ fn status_line(app: &App) -> String {
 
 /// The keybar line (search prompt / error / per-tab hints).
 fn keybar_line(app: &App) -> Line<'static> {
+    if app.repo_search().is_some() {
+        return Line::from(Span::styled(
+            "↑/↓ select · Enter open · Tab switch mode · Esc close",
+            Style::default().fg(Color::Yellow),
+        ));
+    }
     match (app.search(), app.error_message()) {
         (Some(s), _) if s.editing => Line::from(Span::styled(
             format!("/{}", s.query),

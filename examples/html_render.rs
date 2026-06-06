@@ -91,6 +91,18 @@ fn main() -> Result<()> {
         }
         app.handle_key(enter);
     }
+    if has("reposearch") {
+        let root = app.context().root.clone();
+        app.handle_key(key('2')); // Files tab
+        app.handle_key(key('/')); // open repo-wide search (content mode)
+        for c in "greeting".chars() {
+            app.handle_key(key(c));
+        }
+        // No run_loop here: drive the queued async search to completion by hand.
+        if let Some((epoch, query, mode)) = app.take_pending_search() {
+            app.apply_search_result(epoch, gdiff::search::run(&root, &query, mode));
+        }
+    }
     if has("help") {
         app.handle_key(key('?'));
     }

@@ -397,6 +397,81 @@ fn files_tab_browser() {
     insta::assert_snapshot!(frame(&app, 90, 14));
 }
 
+// ---- M14: repo-wide search (Files tab) ----
+
+/// Drive the async repo-search to completion synchronously (there's no run_loop
+/// in tests): take the queued job, run it, and apply the result — the same flow
+/// the event loop performs (see `async_refresh_ignores_stale_results`).
+fn run_pending_search(app: &mut App, root: &std::path::Path) {
+    if let Some((epoch, query, mode)) = app.take_pending_search() {
+        let results = gdiff::search::run(root, &query, mode);
+        app.apply_search_result(epoch, results);
+    }
+}
+
+#[test]
+fn repo_search_content_lists_matches() {
+    let fx = Fixture::new();
+    fx.write("src/lib.rs", "pub fn greet() {}\n");
+    fx.write("src/main.rs", "fn main() {\n    greet();\n}\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    let root = app.context().root.clone();
+
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(key('/')); // open repo search (content mode)
+    for c in "greet".chars() {
+        app.handle_key(key(c));
+    }
+    run_pending_search(&mut app, &root);
+    insta::assert_snapshot!(frame(&app, 90, 18));
+}
+
+#[test]
+fn repo_search_files_mode_lists_paths() {
+    let fx = Fixture::new();
+    fx.write("src/lib.rs", "x\n");
+    fx.write("src/main.rs", "y\n");
+    fx.write("README.md", "z\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    let root = app.context().root.clone();
+
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(key('/')); // open repo search
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // → file-name mode
+    for c in "rs".chars() {
+        app.handle_key(key(c));
+    }
+    run_pending_search(&mut app, &root);
+    insta::assert_snapshot!(frame(&app, 90, 18));
+}
+
+#[test]
+fn repo_search_jumps_to_result() {
+    let fx = Fixture::new();
+    // The match is on line 3 so the jump must scroll there (not just open the file).
+    fx.write("src/lib.rs", "// a\n// b\npub fn greet() {}\n");
+    fx.write("src/main.rs", "fn main() {\n    greet();\n}\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    let root = app.context().root.clone();
+
+    app.handle_key(key('2'));
+    app.handle_key(key('/'));
+    for c in "greet".chars() {
+        app.handle_key(key(c));
+    }
+    run_pending_search(&mut app, &root);
+    // Enter jumps to the first result, closing the overlay and revealing the file.
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(app.repo_search().is_none(), "overlay closes on jump");
+    let loaded = app.browser().loaded().expect("a file is revealed");
+    assert!(loaded.path.ends_with("lib.rs"));
+    // Revealed at the matched line (line 3 → 0-based scroll 2), clamped to file.
+    assert_eq!(app.browser().content_scroll(), 2);
+}
+
 // ---- M5: compare picker ----
 
 #[test]

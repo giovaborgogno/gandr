@@ -12,5 +12,6 @@ pub mod diff;
 pub mod git;
 pub mod highlight;
 pub mod review;
+pub mod search;
 pub mod testutil;
 pub mod ui;
