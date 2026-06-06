@@ -151,7 +151,10 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       working tree against it (`WorkdirVs`). Backed by `GitBackend::list_refs`.
 - [x] M10 — Search across all files (jump to file + match), not just the current file.
       *Delivered by M14 (the repo-wide content search jumps to file + line).*
-- [ ] M11 — Expand context (`o`): reveal more lines around a hunk.
+- [x] M11 — Expand context (`o`): cycles the context window 3→10→30→100 (then
+      wraps), recomputing the diff async to reveal more lines around every hunk
+      (`git diff -U<n>`-style). Header shows `⊕N ctx` while expanded. (A per-gap
+      "⋯ expand here ⋯" affordance remains a future refinement — see backlog.)
 - [ ] M12 — Multi-line syntax highlighting (carry syntect state across a file).
 - [ ] M13 — **Async architecture** (decided: worker threads + crossbeam channels,
       NOT tokio — git2/FS/grep are blocking libs, so a thread pool + an
@@ -181,8 +184,10 @@ Each milestone is independently runnable and ends in a commit. After each, run t
   `[colors]`/`[keys]`) — the `Config` struct + `theme = auto` resolution exist; only
   TOML parsing/merging is unbuilt (would add a `toml` dep). Defaults work today.
 - **Copy** (`y`) path/selection to clipboard (needs `arboard` or OSC 52).
-- **Context expand** (`o` / "expand context") — show more surrounding lines in a hunk
-  (needs full-file content; the engine currently folds to `context_lines`).
+- **Per-gap context expand** — M11 expands context globally (cycles `-U<n>`). A
+  finer "⋯ expand here ⋯" affordance on each fold gap (reveal lines for one hunk
+  only, both directions) would match the DESIGN sketch; needs full-file content
+  and gap rows in the viewer model.
 - **Mouse** (scroll + click-to-select-file) — enable crossterm mouse capture + hit-testing.
 - **Tree-filter search** — `/` currently searches the diff; filtering the file tree by
   query (contextual on tree focus) is unbuilt.

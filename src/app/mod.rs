@@ -317,8 +317,15 @@ impl App {
             ""
         };
         let load = if self.loading { " · ⟳ loading" } else { "" };
+        // Surface an expanded context window (default is 3) so it's not a mystery
+        // why more surrounding lines appear.
+        let ctx = if self.config.context_lines > 3 {
+            format!(" · ⊕{} ctx", self.config.context_lines)
+        } else {
+            String::new()
+        };
         format!(
-            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}{load}"
+            "gdiff · {branch} · {label} · {n} {files}  +{add} −{del} · {reviewed}/{n} reviewed{watch}{ctx}{load}"
         )
     }
 
@@ -486,6 +493,20 @@ impl App {
 
     fn scroll_up(&mut self, n: usize) {
         self.scroll = self.scroll.saturating_sub(n);
+    }
+
+    /// Cycle how many context lines surround each hunk (expand, then wrap back
+    /// to the tightest view), recomputing the diff asynchronously. Lets the user
+    /// reveal more of the file around changes — `git diff -U<n>`-style.
+    fn cycle_context(&mut self) {
+        const LADDER: [usize; 4] = [3, 10, 30, 100];
+        let cur = self.config.context_lines;
+        self.config.context_lines = LADDER
+            .iter()
+            .copied()
+            .find(|&c| c > cur)
+            .unwrap_or(LADDER[0]);
+        self.request_refresh();
     }
 
     fn next_hunk(&mut self) {
@@ -1109,6 +1130,7 @@ impl App {
             }
             KeyCode::Char('s') => self.view = self.view.toggled(),
             KeyCode::Char('w') => self.config.word_diff = !self.config.word_diff,
+            KeyCode::Char('o') => self.cycle_context(),
             KeyCode::Char(' ') => self.toggle_review(),
             KeyCode::Char('r') => self.request_refresh(),
             KeyCode::Char('a') => self.auto_refresh = !self.auto_refresh,
@@ -1235,7 +1257,6 @@ fn run_loop(
     tx: &crossbeam_channel::Sender<jobs::AppEvent>,
     root: &std::path::Path,
 ) -> Result<()> {
-    let context = app.config().context_lines;
     // Event-driven: redraw only when something changed; heavy work runs on
     // background threads and posts results as events.
     let mut dirty = true;
@@ -1245,8 +1266,10 @@ fn run_loop(
             dirty = false;
         }
 
-        // Spawn any queued async refresh, then redraw the loading state.
+        // Spawn any queued async refresh, then redraw the loading state. Read
+        // the context fresh each time so `o` (expand context) takes effect.
         if let Some((epoch, spec)) = app.take_pending_refresh() {
+            let context = app.config().context_lines;
             jobs::spawn_diff(tx.clone(), root.to_path_buf(), spec, context, epoch);
             dirty = true;
             continue;

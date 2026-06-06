@@ -475,6 +475,39 @@ fn repo_search_jumps_to_result() {
     assert_eq!(app.browser().content_scroll(), 2);
 }
 
+// ---- M11: expand context ----
+
+#[test]
+fn expand_context_reveals_more_lines() {
+    let fx = Fixture::new();
+    let base: String = (1..=40).map(|i| format!("line {i}\n")).collect();
+    fx.write("a.txt", &base);
+    fx.commit("init");
+    fx.write("a.txt", &base.replace("line 20\n", "line 20 CHANGED\n"));
+    let mut app = app_from(&fx);
+
+    let lines = |a: &App| -> usize {
+        a.current()
+            .map(|f| f.hunks.iter().map(|h| h.lines.len()).sum())
+            .unwrap_or(0)
+    };
+    let before = lines(&app);
+
+    app.handle_key(key('o')); // expand context 3 → 10
+    app.refresh(); // synchronous recompute (the loop does this async)
+    let after = lines(&app);
+
+    assert!(
+        after > before,
+        "expanding context should reveal more lines: {before} → {after}"
+    );
+    assert!(
+        app.header_line().contains("⊕10 ctx"),
+        "header should advertise the expanded context: {}",
+        app.header_line()
+    );
+}
+
 // ---- M9: fuzzy ref picker ----
 
 #[test]
