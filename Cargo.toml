@@ -1,0 +1,49 @@
+[package]
+name = "gdiff"
+version = "0.1.0"
+edition = "2021"
+description = "A read-only TUI for reviewing git diffs — delta-style highlighting, GitHub-like side-by-side, built for reviewing AI coding-agent changes."
+license = "MIT OR Apache-2.0"
+publish = false           # flip when we decide to release (see PLAN.md "pre-publish")
+
+[dependencies]
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Git backend (always behind the GitBackend trait; swappable for gix later)
+git2 = "0.21"
+
+# Diff engine: line-level + word-level (the engine helix/gitoxide use)
+imara-diff = "0.2"
+
+# Syntax highlighting (delta-style), with embedded syntaxes/themes
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-default-fancy"] }
+
+# Terminal background detection for theme = "auto" (OSC 11)
+termbg = "0.6"
+
+# File watching for live auto-refresh of the working tree
+notify = "8"
+notify-debouncer-mini = "0.7"
+
+# Async diff computation without blocking the render loop
+crossbeam-channel = "0.5"
+
+# Errors
+anyhow = "1"
+
+[dev-dependencies]
+# Snapshot testing of rendered TUI frames (see docs/testing.md)
+insta = "1"
+# Temp git repos for fixtures
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# Faster snapshot/test iteration without sacrificing too much runtime speed.
+[profile.dev]
+opt-level = 1

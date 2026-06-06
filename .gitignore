@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# insta pending snapshots (review then accept; never commit *.snap.new)
+*.snap.new
+
+# local editor / OS noise
+.DS_Store
+*.swp
+
+# gdiff writes per-repo review state under .git/, so nothing to ignore here,
+# but a developer testing against THIS repo will produce:
+.git/gdiff/
+
+# local agent scratch
+/.scratch/
