@@ -226,8 +226,9 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] License: `MIT`; added `LICENSE`.
 - [x] crates.io metadata (authors, repository, keywords, categories, readme, `exclude`); `publish = true`.
 - [x] Polished README (features for both tabs, key reference, install).
-- [ ] **Confirm the GitHub repo URL** in `Cargo.toml` (`repository`/`homepage` currently
-      assume `github.com/giovaborgogno/gandr`) and push the repo there.
+- [x] README demo GIF (VHS — `docs/demo.tape` + `docs/demo-setup.sh`), hosted on
+      GitHub user-attachments so it renders on crates.io too.
+- [x] Repo URL confirmed: `github.com/giovaborgogno/gandr` (`repository`/`homepage`).
+- [ ] Create the GitHub repo and push (no `origin` remote yet).
 - [ ] Rename the working directory `difftui/` → `gandr/` to match the crate (manual; left to you).
-- [ ] Add a screenshot / asciinema to the README.
 - [ ] `git tag v0.1.0` and `cargo publish` (run by you — not automated).

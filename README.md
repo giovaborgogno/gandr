@@ -6,7 +6,7 @@ clarity of GitHub's diff view and the rendering quality of
 an AI coding agent (like Claude Code) makes — live as it edits, or as the PR it opened — then
 exploring the rest of the codebase without leaving your terminal.
 
-![gandr in action](https://raw.githubusercontent.com/giovaborgogno/gandr/main/docs/demo.gif)
+![gandr in action](https://github.com/user-attachments/assets/766c2fca-513c-4b36-9702-00eb565a49c9)
 
 > Status: feature-complete and stable. Two tabs — a **Diff** reviewer and a
 > **Repo** browser — with live refresh, review tracking, and repo-wide search.
