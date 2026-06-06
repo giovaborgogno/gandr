@@ -49,8 +49,11 @@ pub struct Browser {
     expanded: HashSet<PathBuf>,
     cursor: usize,
     tree_scroll: Cell<usize>,
-    content_scroll: usize,
-    content_viewport: Cell<usize>,
+    /// Current line in the preview (j/k move it; the viewport follows and the
+    /// row is highlighted), mirroring the diff cursor.
+    content_cursor: usize,
+    /// Viewport top of the preview (follows the cursor); updated at render.
+    content_scroll: Cell<usize>,
     loaded: Option<Loaded>,
     /// Cache of visible rows (rebuilt only when the expanded set changes, not
     /// every frame — avoids walking disk on every render/keystroke).
@@ -88,8 +91,8 @@ impl Browser {
             expanded: HashSet::new(),
             cursor: 0,
             tree_scroll: Cell::new(0),
-            content_scroll: 0,
-            content_viewport: Cell::new(0),
+            content_cursor: 0,
+            content_scroll: Cell::new(0),
             loaded: None,
             rows_cache: RefCell::new(Vec::new()),
             rows_dirty: Cell::new(true),
@@ -207,9 +210,27 @@ impl Browser {
             .collect()
     }
 
-    /// Scroll the preview so `line` (0-based) is at the top (clamped at render).
+    /// Put the preview cursor on `line` (0-based) — e.g. a search match.
     pub fn scroll_content_to(&mut self, line: usize) {
-        self.content_scroll = line;
+        self.content_cursor = line.min(self.content_last_line());
+        self.anchor_content_near_top();
+    }
+
+    /// After a jump (search/reveal), pre-position the viewport so the target
+    /// sits a few rows from the top — not pinned to the bottom edge by the
+    /// follow logic in `content_scroll`. Mirrors the diff viewer.
+    fn anchor_content_near_top(&self) {
+        const MARGIN: usize = 3;
+        self.content_scroll
+            .set(self.content_cursor.saturating_sub(MARGIN));
+    }
+
+    /// Last valid preview line index.
+    fn content_last_line(&self) -> usize {
+        self.loaded
+            .as_ref()
+            .map(|l| l.lines.len().saturating_sub(1))
+            .unwrap_or(0)
     }
 
     /// First visible tree row so the cursor stays on-screen for `height` rows.
@@ -227,13 +248,23 @@ impl Browser {
     pub fn loaded(&self) -> Option<&Loaded> {
         self.loaded.as_ref()
     }
-    pub fn content_scroll(&self) -> usize {
-        self.content_scroll
+    /// The current preview line (for cursor highlighting + search position).
+    pub fn content_cursor(&self) -> usize {
+        self.content_cursor
     }
-    pub fn set_content_viewport(&self, rows: usize) {
-        self.content_viewport.set(rows);
+    /// Viewport top of the preview, keeping the cursor visible for `height` rows.
+    pub fn content_scroll(&self, height: usize) -> usize {
+        let total = self.loaded.as_ref().map(|l| l.lines.len()).unwrap_or(0);
+        let mut s = self.content_scroll.get();
+        if self.content_cursor < s {
+            s = self.content_cursor;
+        } else if height > 0 && self.content_cursor >= s + height {
+            s = self.content_cursor + 1 - height;
+        }
+        s = s.min(total.saturating_sub(height.max(1)));
+        self.content_scroll.set(s);
+        s
     }
-
     // ---- navigation ----
 
     pub fn cursor_down(&mut self) {
@@ -337,27 +368,17 @@ impl Browser {
             // clamped to the file we actually loaded (only after a successful
             // load, so a missing row never scrolls the previously-shown file).
             if let Some(l) = line {
-                let max = self
-                    .loaded
-                    .as_ref()
-                    .map(|f| f.lines.len().saturating_sub(1))
-                    .unwrap_or(0);
-                self.content_scroll = l.saturating_sub(1).min(max);
+                self.content_cursor = l.saturating_sub(1).min(self.content_last_line());
+                self.anchor_content_near_top();
             }
         }
     }
 
     pub fn scroll_content_down(&mut self, n: usize) {
-        let max = self
-            .loaded
-            .as_ref()
-            .map(|l| l.lines.len())
-            .unwrap_or(0)
-            .saturating_sub(self.content_viewport.get().max(1));
-        self.content_scroll = (self.content_scroll + n).min(max);
+        self.content_cursor = (self.content_cursor + n).min(self.content_last_line());
     }
     pub fn scroll_content_up(&mut self, n: usize) {
-        self.content_scroll = self.content_scroll.saturating_sub(n);
+        self.content_cursor = self.content_cursor.saturating_sub(n);
     }
 
     /// Read the file under the cursor into the content cache (if it changed).
@@ -371,7 +392,8 @@ impl Browser {
         if self.loaded.as_ref().map(|l| &l.path) == Some(&row.path) {
             return;
         }
-        self.content_scroll = 0;
+        self.content_cursor = 0;
+        self.content_scroll.set(0);
 
         // Don't read huge files into memory for a preview.
         if std::fs::metadata(&row.path).map(|m| m.len()).unwrap_or(0) > MAX_PREVIEW_BYTES {

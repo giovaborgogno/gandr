@@ -78,7 +78,6 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
-    app.browser().set_content_viewport(inner.height as usize);
 
     let Some(loaded) = app.browser().loaded() else {
         f.render_widget(Paragraph::new("Select a file to view its contents."), inner);
@@ -99,10 +98,9 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     };
     let height = inner.height as usize;
     let total = loaded.lines.len();
-    let scroll = app
-        .browser()
-        .content_scroll()
-        .min(total.saturating_sub(height));
+    let scroll = app.browser().content_scroll(height);
+    let cursor = app.browser().content_cursor();
+    let focused = app.focus() == Focus::Diff; // content pane focused
     let gutter_w = total.to_string().len().max(2);
     // Highlight content-search matches in the preview (after a repo content jump).
     let query = app.browser_query().filter(|q| !q.is_empty());
@@ -110,9 +108,15 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
 
     let mut lines: Vec<Line> = Vec::new();
     for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
+        // The current line's number is reversed ("you are here").
+        let gutter_style = if focused && idx == cursor {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         let mut spans = vec![Span::styled(
             format!("{:>gutter_w$} ", idx + 1),
-            Style::default().fg(Color::DarkGray),
+            gutter_style,
         )];
         // Syntax spans arrive from a background job (`highlight_target`); until
         // then `fg` is empty and the line renders plain — so selecting a file

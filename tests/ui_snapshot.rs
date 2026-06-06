@@ -489,7 +489,7 @@ fn repo_search_jumps_to_result() {
     let loaded = app.browser().loaded().expect("a file is revealed");
     assert!(loaded.path.ends_with("lib.rs"));
     // Revealed at the matched line (line 3 → 0-based scroll 2), clamped to file.
-    assert_eq!(app.browser().content_scroll(), 2);
+    assert_eq!(app.browser().content_cursor(), 2);
 }
 
 #[test]
@@ -514,11 +514,11 @@ fn files_content_search_keeps_query_and_navigates() {
 
     // The query is kept so the preview highlights it and n/N can navigate.
     assert_eq!(app.browser_query(), Some("needle"));
-    assert_eq!(app.browser().content_scroll(), 0); // first match: line 1
+    assert_eq!(app.browser().content_cursor(), 0); // first match: line 1
     app.handle_key(key('n')); // → next match (line 4 → 0-based 3)
-    assert_eq!(app.browser().content_scroll(), 3);
+    assert_eq!(app.browser().content_cursor(), 3);
     app.handle_key(key('n')); // wraps back to the first
-    assert_eq!(app.browser().content_scroll(), 0);
+    assert_eq!(app.browser().content_cursor(), 0);
     // Switching to the Diff tab clears the preview highlight.
     app.handle_key(key('1'));
     assert_eq!(app.browser_query(), None);

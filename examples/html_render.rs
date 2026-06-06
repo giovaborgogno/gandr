@@ -138,6 +138,15 @@ fn main() -> Result<()> {
         app.handle_key(enter); // expand src (cursor stays on src)
         app.handle_key(key('j')); // → app/
         app.handle_key(key('j')); // → demo.rs (loads it)
+        app.handle_key(enter); // focus the content pane
+        app.handle_key(key('j')); // move the content cursor down a few lines
+        app.handle_key(key('j'));
+        app.handle_key(key('j'));
+        // Drive the async preview highlight to completion for the screenshot.
+        if let Some((epoch, path, lines, mode)) = app.take_pending_browser_highlight() {
+            let hl = gdiff::highlight::Highlighter::for_path(&path, mode);
+            app.apply_browser_highlight(epoch, path, hl.highlight_file(&lines));
+        }
     }
     if has("diffml") {
         // A change a few lines below a multi-line block comment: the context

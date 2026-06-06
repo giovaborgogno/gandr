@@ -995,7 +995,7 @@ impl App {
             Tab::Files => self
                 .browser
                 .loaded()
-                .map(|l| (l.path.clone(), self.browser.content_scroll() as u32 + 1)),
+                .map(|l| (l.path.clone(), self.browser.content_cursor() as u32 + 1)),
         };
     }
 
@@ -1280,7 +1280,7 @@ impl App {
         if matches.is_empty() {
             return;
         }
-        let cur = self.browser.content_scroll();
+        let cur = self.browser.content_cursor();
         let target = if forward {
             matches
                 .iter()
