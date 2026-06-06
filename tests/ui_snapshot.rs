@@ -650,6 +650,22 @@ fn h_l_collapse_and_expand_dirs_in_files_tab() {
     );
 }
 
+#[test]
+fn tree_nav_wraps_around() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "a\n");
+    fx.write("b.txt", "b\n");
+    fx.commit("init");
+    fx.write("a.txt", "a2\n");
+    fx.write("b.txt", "b2\n");
+    let mut app = app_from(&fx); // focus starts on the tree; two file rows
+    assert_eq!(app.tree_cursor(), 0);
+    app.handle_key(key('k')); // up at the top wraps to the bottom
+    assert_eq!(app.tree_cursor(), 1);
+    app.handle_key(key('j')); // down at the bottom wraps to the top
+    assert_eq!(app.tree_cursor(), 0);
+}
+
 // ---- edge cases: render without panic ----
 
 #[test]

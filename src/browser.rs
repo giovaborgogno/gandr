@@ -231,12 +231,25 @@ impl Browser {
         if len == 0 {
             return;
         }
-        self.cursor = (self.cursor + 1).min(len - 1);
+        // Wrap to the top at the end (like a wheel).
+        self.cursor = if self.cursor + 1 >= len {
+            0
+        } else {
+            self.cursor + 1
+        };
         self.load_selection();
     }
 
     pub fn cursor_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
+        let len = self.rows().len();
+        if len == 0 {
+            return;
+        }
+        self.cursor = if self.cursor == 0 {
+            len - 1
+        } else {
+            self.cursor - 1
+        };
         self.load_selection();
     }
 

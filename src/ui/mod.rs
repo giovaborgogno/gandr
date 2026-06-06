@@ -515,6 +515,53 @@ fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
     );
 }
 
+/// A friendly, centered placeholder when the comparison has no differences.
+fn render_empty_state(f: &mut Frame, area: Rect) {
+    let hint = |k: &'static str, label: &'static str| {
+        Line::from(vec![
+            Span::styled(
+                format!("{k:>5}  "),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(label, Style::default().fg(Color::Gray)),
+        ])
+        .alignment(ratatui::layout::Alignment::Left)
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "✓  No changes to review",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(ratatui::layout::Alignment::Center),
+        Line::from(Span::styled(
+            "this comparison is empty",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .alignment(ratatui::layout::Alignment::Center),
+        Line::raw(""),
+        hint("c", "compare against…"),
+        hint("b", "pick a branch or tag"),
+        hint("2", "browse the repository"),
+        hint("r", "refresh"),
+    ];
+    // Center the block vertically; keep a left-aligned hint column readable.
+    let h = lines.len() as u16;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let box_w = 32u16.min(area.width);
+    let x = area.x + area.width.saturating_sub(box_w) / 2;
+    let rect = Rect {
+        x,
+        y,
+        width: box_w,
+        height: h.min(area.height),
+    };
+    f.render_widget(Paragraph::new(lines), rect);
+}
+
 /// The right panel: a sticky file header plus the scrollable diff body.
 fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     let block = Block::bordered().border_style(border_style(app.focus() == Focus::Diff));
@@ -522,12 +569,7 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(block, area);
 
     let Some(file) = app.current() else {
-        f.render_widget(
-            Paragraph::new(
-                "No uncommitted changes. Press `c` to compare against a branch, or run with --smart.",
-            ),
-            inner,
-        );
+        render_empty_state(f, inner);
         app.set_viewport(0);
         return;
     };

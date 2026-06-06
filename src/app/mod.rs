@@ -675,12 +675,26 @@ impl App {
         if len == 0 {
             return;
         }
-        self.tree_cursor = (self.tree_cursor + 1).min(len - 1);
+        // Wrap to the top at the end (like a wheel).
+        self.tree_cursor = if self.tree_cursor + 1 >= len {
+            0
+        } else {
+            self.tree_cursor + 1
+        };
         self.sync_selection();
     }
 
     fn cursor_up(&mut self) {
-        self.tree_cursor = self.tree_cursor.saturating_sub(1);
+        let len = self.tree_rows().len();
+        if len == 0 {
+            return;
+        }
+        // Wrap to the bottom at the top.
+        self.tree_cursor = if self.tree_cursor == 0 {
+            len - 1
+        } else {
+            self.tree_cursor - 1
+        };
         self.sync_selection();
     }
 
