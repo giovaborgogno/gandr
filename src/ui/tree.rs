@@ -171,7 +171,7 @@ pub fn render(
             Style::default()
         };
 
-        let spans = match &row.kind {
+        let mut spans = match &row.kind {
             RowKind::Dir { expanded, .. } => {
                 let arrow = if *expanded { '▾' } else { '▸' };
                 vec![Span::styled(
@@ -195,6 +195,15 @@ pub fn render(
                 ]
             }
         };
+
+        // Extend the row to the full panel width so the selected row's highlight
+        // spans the whole panel, not just the text.
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width = inner.width as usize;
+        if used < width {
+            spans.push(Span::styled(" ".repeat(width - used), row_style));
+        }
+
         lines.push(Line::from(spans));
     }
 

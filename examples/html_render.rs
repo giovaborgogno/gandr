@@ -62,11 +62,40 @@ fn main() -> Result<()> {
     let backend = Box::new(Git2Backend::open(fx.path())?);
     let mut app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
     app.set_theme_mode(ThemeMode::Dark);
-    if std::env::args().any(|a| a == "split") {
-        app.handle_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char('s'),
-            crossterm::event::KeyModifiers::empty(),
-        ));
+
+    // Scenario keywords (any combination) drive the App into a feature's state.
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let key = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+    let args: Vec<String> = std::env::args().collect();
+    let has = |s: &str| args.iter().any(|a| a == s);
+
+    if has("split") {
+        app.handle_key(key('s'));
+    }
+    if has("wordoff") {
+        app.handle_key(key('w'));
+    }
+    if has("review") {
+        app.handle_key(key(' ')); // review the first file (main.rs)
+        app.handle_key(key('n')); // → next file (README.md)
+        app.handle_key(key(' ')); // review it too
+                                  // Now change README on disk and refresh → it becomes "changed since reviewed".
+        fx.write("README.md", "# gdiff\n\nA fast delta-style diff viewer.\n");
+        app.refresh();
+    }
+    if has("search") {
+        app.handle_key(key('/'));
+        for c in "greeting".chars() {
+            app.handle_key(key(c));
+        }
+        app.handle_key(enter);
+    }
+    if has("help") {
+        app.handle_key(key('?'));
+    }
+    if has("picker") {
+        app.handle_key(key('c'));
     }
 
     let env_u16 = |k: &str, d: u16| {
