@@ -180,6 +180,13 @@ fn main() -> Result<()> {
             app.handle_key(enter); // expand the first fold (top)
         }
     }
+    if has("empty") {
+        // Commit the pending changes → a clean working tree → the empty state.
+        fx.commit("commit everything");
+        let backend = Box::new(Git2Backend::open(fx.path())?);
+        app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;
+        app.set_theme_mode(ThemeMode::Dark);
+    }
     if has("help") {
         app.handle_key(key('?'));
     }

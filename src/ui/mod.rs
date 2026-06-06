@@ -36,7 +36,7 @@ const KEYBAR: &[(&str, &str)] = &[
 /// Essential key hints for the Files tab.
 const KEYBAR_FILES: &[(&str, &str)] = &[
     ("Enter", "open"),
-    ("←/→", "fold"),
+    ("h/l", "fold"),
     ("/", "search"),
     ("1", "diff"),
     ("?", "help"),
@@ -409,7 +409,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("g / G", "top / bottom"),
         ("Ctrl-d / u", "half-page down / up"),
         ("Enter", "open file · expand fold"),
-        ("→ / ←", "expand / collapse dir"),
+        ("h / l, ← / →", "collapse / expand dir"),
         ("s", "unified / side-by-side"),
         ("w", "word-level highlight"),
         ("o", "context window 3→10→30→100"),
@@ -516,7 +516,18 @@ fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
 }
 
 /// A friendly, centered placeholder when the comparison has no differences.
-fn render_empty_state(f: &mut Frame, area: Rect) {
+fn render_empty_state(app: &App, f: &mut Frame, area: Rect) {
+    // Say *which* comparison is empty, so the header isn't the only place that
+    // tells you what you're looking at.
+    let subtitle = match app.compare_against() {
+        Some(r) => format!("working tree matches {r}"),
+        None => match app.comparison_label().as_str() {
+            "uncommitted" => "your working tree is clean".to_string(),
+            "staged" => "nothing is staged".to_string(),
+            _ => "this comparison is empty".to_string(),
+        },
+    };
+    let subtitle_w = subtitle.chars().count() as u16;
     let hint = |k: &'static str, label: &'static str| {
         Line::from(vec![
             Span::styled(
@@ -537,11 +548,8 @@ fn render_empty_state(f: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(ratatui::layout::Alignment::Center),
-        Line::from(Span::styled(
-            "this comparison is empty",
-            Style::default().fg(Color::DarkGray),
-        ))
-        .alignment(ratatui::layout::Alignment::Center),
+        Line::from(Span::styled(subtitle, Style::default().fg(Color::DarkGray)))
+            .alignment(ratatui::layout::Alignment::Center),
         Line::raw(""),
         hint("c", "compare against…"),
         hint("b", "pick a branch or tag"),
@@ -551,7 +559,9 @@ fn render_empty_state(f: &mut Frame, area: Rect) {
     // Center the block vertically; keep a left-aligned hint column readable.
     let h = lines.len() as u16;
     let y = area.y + area.height.saturating_sub(h) / 2;
-    let box_w = 32u16.min(area.width);
+    // Fit the box to its widest line (the subtitle grows with the ref name) so
+    // the comparison never truncates; clamp to the available width.
+    let box_w = (subtitle_w + 4).max(30).min(area.width);
     let x = area.x + area.width.saturating_sub(box_w) / 2;
     let rect = Rect {
         x,
@@ -569,7 +579,7 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(block, area);
 
     let Some(file) = app.current() else {
-        render_empty_state(f, inner);
+        render_empty_state(app, f, inner);
         app.set_viewport(0);
         return;
     };
