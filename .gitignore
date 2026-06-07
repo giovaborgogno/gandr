@@ -16,6 +16,10 @@ Cargo.lock.orig
 # local agent scratch
 /.scratch/
 
+# release packaging (the Homebrew formula lives in the separate tap repo;
+# this is just a local template/source — not part of the gandr crate)
+/dist/
+
 # locally-installed agent skills (symlinks) + their content — not part of gandr.
 # Keep only the project's own skills under .claude/skills/.
 /.agents/
