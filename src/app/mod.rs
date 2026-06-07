@@ -1992,11 +1992,11 @@ impl App {
                 return;
             }
             KeyCode::Char('2') => {
-                // Carry the diff's current file + line into the Repo preview.
-                let target = self
-                    .current()
-                    .map(|f| f.change.path.clone())
-                    .zip(self.diff_cursor_line());
+                // Carry the diff's current file into the Repo preview — plus the
+                // line when the cursor is on one (it may sit on a fold marker, in
+                // which case we still open the file, just not at a specific line).
+                let path = self.current().map(|f| f.change.path.clone());
+                let line = self.diff_cursor_line();
                 self.tab = Tab::Files;
                 self.picker = None;
                 self.search = None;
@@ -2005,9 +2005,9 @@ impl App {
                 self.quickfix = None;
                 self.pending_search = None;
                 self.browser_query = None; // drop any in-view highlight (symmetry with `1`)
-                if let Some((rel, line)) = target {
+                if let Some(rel) = path {
                     let abs = self.context.root.join(rel);
-                    self.browser.reveal(&abs, Some(line as usize));
+                    self.browser.reveal(&abs, line.map(|l| l as usize));
                 }
                 return;
             }

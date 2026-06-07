@@ -620,6 +620,25 @@ fn switching_tabs_carries_the_current_file_and_line() {
 }
 
 #[test]
+fn diff_to_repo_carries_the_file_even_with_a_fold_at_the_cursor() {
+    // Regression: the file must carry to the Repo tab even when the diff cursor
+    // sits on a fold marker (a deep change folds the top), where there's no line
+    // number — the old code skipped the whole sync in that case.
+    let fx = Fixture::new();
+    let base: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+    fx.write("deep.txt", &base);
+    fx.commit("init");
+    fx.write("deep.txt", &base.replace("line 20\n", "line 20 CHANGED\n"));
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // switch without moving — top of the diff is a fold
+    let loaded = app
+        .browser()
+        .loaded()
+        .expect("the file should carry to the Repo tab from a fold cursor");
+    assert!(loaded.path.ends_with("deep.txt"));
+}
+
+#[test]
 fn split_view_paints_the_visual_selection() {
     // The side-by-side viewer now honors the visual selection (and the cursor):
     // a selected row's cells paint the selection background across their width.
