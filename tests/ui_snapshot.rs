@@ -729,6 +729,56 @@ fn arrows_enter_and_exit_a_file_in_files_tab() {
 }
 
 #[test]
+fn long_lines_wrap_in_the_repo_preview() {
+    // The Repo preview must wrap long lines (like the Diff viewer), not truncate
+    // them — so the tail of a long line is still visible further down the pane.
+    let fx = Fixture::new();
+    let long = "word ".repeat(40); // ~200 cols, far wider than any pane here
+    fx.write("long.txt", &format!("{long}\nshort\n"));
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // enter content
+    let out = frame(&app, 80, 16);
+    // The line wraps onto multiple rows, so "short" (the next logical line) is
+    // pushed well below row 1 and is still rendered — not clipped by truncation.
+    assert!(
+        out.contains("short"),
+        "the second line should still render after the first wraps:\n{out}"
+    );
+    // A wrapped continuation row carries a blank line-number gutter, so the word
+    // count visible exceeds what a single truncated row could hold.
+    let words = out.matches("word").count();
+    assert!(
+        words > 10,
+        "a wrapped line should show many segments, got {words}:\n{out}"
+    );
+}
+
+#[test]
+fn preview_keeps_the_cursor_visible_when_lines_wrap() {
+    // With wrapped lines each logical line spans several terminal rows, so a
+    // naive logical-line scroll would push the cursor (on the last line) off the
+    // bottom. The preview must follow the cursor in display rows, like the diff.
+    let fx = Fixture::new();
+    let body: String = (1..=8)
+        .map(|i| format!("L{i} {}\n", "x".repeat(120)))
+        .collect();
+    fx.write("wide.txt", &body);
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // enter content
+                                                                          // Ctrl-d jumps the cursor toward the bottom (clamped to the last line).
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    let out = frame(&app, 80, 10);
+    assert!(
+        out.contains("L8"),
+        "the cursor line (L8) must stay visible after wrapping pushes it down:\n{out}"
+    );
+}
+
+#[test]
 fn tree_nav_wraps_around() {
     let fx = Fixture::new();
     fx.write("a.txt", "a\n");

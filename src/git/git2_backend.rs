@@ -212,9 +212,17 @@ impl GitBackend for Git2Backend {
             // vendored folder or an embedded repo it won't recurse into (e.g.
             // `.claude/skills/<name>/`). It isn't a reviewable file, so skip it
             // rather than trying (and failing) to read a directory as a blob.
-            if let Some(wd) = self.repo.workdir() {
-                if wd.join(&path).is_dir() {
-                    continue;
+            // Only for specs whose *new* side is read from the working tree
+            // (Uncommitted / WorkdirVs): a tree- or index-vs-tree comparison
+            // yields blob deltas, and probing the on-disk path could wrongly
+            // drop a path that is a valid blob on its side but a dir on disk
+            // now (e.g. a staged file shadowed by an untracked dir of the same
+            // name — `Staged` is live but reads from the index).
+            if matches!(spec, CompareSpec::Uncommitted | CompareSpec::WorkdirVs(_)) {
+                if let Some(wd) = self.repo.workdir() {
+                    if wd.join(&path).is_dir() {
+                        continue;
+                    }
                 }
             }
             let is_binary = delta.new_file().is_binary() || delta.old_file().is_binary();

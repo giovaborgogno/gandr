@@ -19,8 +19,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
-/// Width of the file tree panel, in columns.
-const TREE_WIDTH: u16 = 32;
+/// Width of the file tree panel, in columns. Shared by the Diff tree and the
+/// Repo browser so the two tabs are visually identical.
+pub(crate) const TREE_WIDTH: u16 = 34;
 
 /// Essential key hints for the keybar (key, label). The full list lives in `?`,
 /// so this stays a single, uncluttered line that fits a narrow (half) terminal.
@@ -91,6 +92,77 @@ fn border_style(focused: bool) -> Style {
     } else {
         Style::default().fg(Color::DarkGray)
     }
+}
+
+/// One row of a file tree, shared by the Diff tree and the Repo browser so both
+/// tabs lay out identically. Columns, left to right:
+///
+/// ```text
+/// [review][status] [indent][▾/▸ |   ]name
+///    0       1     2  …
+/// ```
+///
+/// * `review` — `✓`/`⚠` (Diff review state); `None` renders a blank column so
+///   the status marker still lines up in the Repo tab, which has no review.
+/// * `status` — the `M`/`A`/`D`/`R` change marker (or `•` for a touched dir);
+///   `None` renders blank. This column is at the **same x in both tabs**.
+/// * `arrow` — `Some(expanded)` for a directory (gets `▾ `/`▸ ` + a trailing
+///   `/`), `None` for a file (gets two leading spaces so names align under the
+///   arrow).
+/// * `label_color` — colors the arrow+name (e.g. blue dirs, status-colored
+///   changed files); dropped on the selected row so the reversed highlight
+///   stays uniform.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn tree_row_line(
+    width: usize,
+    selected: bool,
+    depth: usize,
+    review: Option<(char, Color)>,
+    status: Option<(char, Color)>,
+    arrow: Option<bool>,
+    label: &str,
+    label_color: Option<Color>,
+) -> Line<'static> {
+    let row_style = if selected {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    // On the selected row we drop fg colors: a colored fg would invert into a
+    // colored background block under REVERSED.
+    let gutter = |cell: Option<(char, Color)>| {
+        let (ch, color) = cell.unwrap_or((' ', Color::Reset));
+        let style = if selected || cell.is_none() {
+            row_style
+        } else {
+            row_style.fg(color)
+        };
+        Span::styled(ch.to_string(), style)
+    };
+
+    let indent = "  ".repeat(depth);
+    let body = match arrow {
+        Some(expanded) => format!("{} {label}/", if expanded { '▾' } else { '▸' }),
+        None => format!("  {label}"),
+    };
+    let body_style = match (selected, label_color) {
+        (true, _) | (false, None) => row_style,
+        (false, Some(c)) => row_style.fg(c),
+    };
+
+    let mut spans = vec![
+        gutter(review),
+        gutter(status),
+        Span::styled(" ", row_style),
+        Span::styled(indent.clone(), row_style),
+        Span::styled(body.clone(), body_style),
+    ];
+    // Pad to the panel width so the selected row's highlight spans the panel.
+    let used = 3 + indent.chars().count() + body.chars().count();
+    if used < width {
+        spans.push(Span::styled(" ".repeat(width - used), row_style));
+    }
+    Line::from(spans)
 }
 
 /// Draw the whole frame: gitui-style header (tabs + separator), body, keybar.

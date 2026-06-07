@@ -27,10 +27,13 @@ impl Viewport {
         self.cursor = cursor;
     }
 
-    /// Reset to the top (e.g. when a different file is selected).
+    /// Reset to the top (e.g. when a different file is selected). Also clears
+    /// any active visual selection — the anchor refers to rows in the old
+    /// content and must not persist into the new one.
     pub fn reset(&mut self) {
         self.cursor = 0;
         self.scroll.set(0);
+        self.anchor = None;
     }
 
     /// Pin the viewport to the top (the cursor is set separately).

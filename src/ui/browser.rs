@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-const TREE_WIDTH: u16 = 36;
+use super::TREE_WIDTH;
 
 /// Tree color for a file's change status (matches a git-client palette).
 fn status_color(s: Status) -> Color {
@@ -58,11 +58,6 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(scroll).take(height) {
         let selected = i == cursor;
-        let row_style = if selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
         let rel = row.path.strip_prefix(root).unwrap_or(&row.path);
         let file_status = match row.kind {
             EntryKind::File => changed.get(rel).copied(),
@@ -70,43 +65,26 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
         };
         let dir_touched = matches!(row.kind, EntryKind::Dir { .. }) && changed_dirs.contains(rel);
 
-        // 2-col status gutter, then the indented arrow/name.
-        let (mark, mark_color) = match (file_status, dir_touched) {
-            (Some(st), _) => (st.marker(), status_color(st)),
-            (None, true) => ('•', Color::DarkGray),
-            _ => (' ', Color::DarkGray),
+        // Status gutter: a file's M/A/D/R marker, or a • on a touched directory.
+        let status = match (file_status, dir_touched) {
+            (Some(st), _) => Some((st.marker(), status_color(st))),
+            (None, true) => Some(('•', Color::DarkGray)),
+            _ => None,
         };
-        let indent = "  ".repeat(row.depth);
-        let body = match &row.kind {
-            EntryKind::Dir { expanded } => {
-                let arrow = if *expanded { '▾' } else { '▸' };
-                format!("{indent}{arrow} {}/", row.name)
-            }
-            EntryKind::File => format!("{indent}  {}", row.name),
+        let (arrow, label_color) = match &row.kind {
+            EntryKind::Dir { expanded } => (Some(*expanded), Some(Color::Blue)),
+            EntryKind::File => (None, file_status.map(status_color)),
         };
-        let body_style = if selected {
-            row_style
-        } else if let Some(st) = file_status {
-            row_style.fg(status_color(st))
-        } else if matches!(row.kind, EntryKind::Dir { .. }) {
-            row_style.fg(Color::Blue)
-        } else {
-            row_style
-        };
-        let gutter_style = if selected {
-            row_style
-        } else {
-            Style::default().fg(mark_color)
-        };
-        let mut spans = vec![
-            Span::styled(format!("{mark} "), gutter_style),
-            Span::styled(body.clone(), body_style),
-        ];
-        let used = 2 + body.chars().count();
-        if used < width {
-            spans.push(Span::styled(" ".repeat(width - used), row_style));
-        }
-        lines.push(Line::from(spans));
+        lines.push(super::tree_row_line(
+            width,
+            selected,
+            row.depth,
+            None, // the Repo tab has no review state — keeps the gutter aligned
+            status,
+            arrow,
+            &row.name,
+            label_color,
+        ));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -155,8 +133,35 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     let selection = app.browser().content_selection();
     let sel_bg = Color::Rgb(45, 55, 78);
 
+    // Long lines wrap within the content column (matching the diff viewer)
+    // rather than truncating. Scrolling is per logical line: each line starts a
+    // fresh row, and its wrapped continuations carry a blank gutter.
+    let wrap_w = cw.saturating_sub(gutter_w + 1).max(1);
+    // How many terminal rows a logical line occupies once wrapped to `wrap_w`.
+    // `wrap_spans` breaks on every `wrap_w`th char, so this matches its output.
+    let disp_rows = |i: usize| -> usize {
+        let n = loaded.lines.get(i).map_or(0, |t| t.chars().count());
+        n.div_ceil(wrap_w).max(1)
+    };
+    // Because wrapped lines take several terminal rows, the logical-line scroll
+    // from `content_scroll` isn't enough to keep the cursor on screen. Mirror the
+    // unified viewer: start at the follow-scroll line, then pull the top down
+    // until the cursor's wrapped rows fit in `height` (so the cursor is always
+    // visible without measuring the whole file).
+    let mut top = scroll.min(total.saturating_sub(1)).min(cursor);
+    while top < cursor {
+        let used: usize = (top..=cursor).map(disp_rows).sum();
+        if used <= height {
+            break;
+        }
+        top += 1;
+    }
+
     let mut lines: Vec<Line> = Vec::new();
-    for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
+    for (idx, text) in loaded.lines.iter().enumerate().skip(top) {
+        if lines.len() >= height {
+            break;
+        }
         let selected = selection.is_some_and(|(lo, hi)| idx >= lo && idx <= hi);
         // The current line's number is reversed ("you are here").
         let gutter_style = if focused && idx == cursor {
@@ -164,16 +169,12 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        let mut spans = vec![Span::styled(
-            format!("{:>gutter_w$} ", idx + 1),
-            gutter_style,
-        )];
         // Syntax spans arrive from a background job (`highlight_target`); until
         // then `fg` is empty and the line renders plain — so selecting a file
         // never blocks on syntect. The composer still applies the search match.
         let empty = Vec::new();
         let fg = loaded.highlights.get(idx).unwrap_or(&empty);
-        spans.extend(crate::highlight::compose::line_spans(
+        let content_spans = crate::highlight::compose::line_spans(
             text,
             crate::diff::LineKind::Context,
             &[],
@@ -181,18 +182,34 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             &palette,
             false,
             query,
-        ));
-        if selected {
-            // Pad to the panel edge so the selection background spans the row.
-            let used = gutter_w + 1 + text.chars().count();
-            if used < cw {
-                spans.push(Span::raw(" ".repeat(cw - used)));
+        );
+        let wrapped = crate::ui::viewer_split::wrap_spans(&content_spans, wrap_w);
+        for (sub, seg) in wrapped.into_iter().enumerate() {
+            if lines.len() >= height {
+                break;
             }
-            lines.push(Line::from(spans).style(Style::default().bg(sel_bg)));
-        } else {
-            lines.push(Line::from(spans));
+            let gutter = if sub == 0 {
+                Span::styled(format!("{:>gutter_w$} ", idx + 1), gutter_style)
+            } else {
+                Span::styled(" ".repeat(gutter_w + 1), Style::default())
+            };
+            let mut spans = vec![gutter];
+            let seg_w: usize = seg.iter().map(|s| s.content.chars().count()).sum();
+            spans.extend(seg);
+            if selected {
+                // Pad to the panel edge so the selection background spans the row.
+                let used = gutter_w + 1 + seg_w;
+                if used < cw {
+                    spans.push(Span::raw(" ".repeat(cw - used)));
+                }
+                lines.push(Line::from(spans).style(Style::default().bg(sel_bg)));
+            } else {
+                lines.push(Line::from(spans));
+            }
         }
     }
     f.render_widget(Paragraph::new(lines), content);
-    super::render_scrollbar(f, inner, total, scroll);
+    // Scrollbar is approximated in logical lines (matching the unified viewer);
+    // `top` is the first logical line drawn after the cursor-visibility pass.
+    super::render_scrollbar(f, inner, total, top);
 }

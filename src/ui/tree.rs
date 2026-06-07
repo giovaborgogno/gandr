@@ -6,8 +6,8 @@ use crate::diff::FileDiff;
 use crate::git::Status;
 use crate::review::ReviewStatus;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Color;
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use std::collections::{BTreeMap, HashSet};
@@ -118,37 +118,26 @@ fn emit(dir: &Dir, prefix: &Path, depth: usize, collapsed: &HashSet<PathBuf>, ou
     }
 }
 
-fn status_marker(files: &[FileDiff], index: usize) -> char {
-    files
-        .get(index)
-        .map(|f| f.change.status.marker())
-        .unwrap_or('?')
-}
-
-fn marker_color(files: &[FileDiff], index: usize) -> Color {
-    match files.get(index).map(|f| f.change.status) {
+/// The `M`/`A`/`D`/`R` change marker for a file, with its palette color.
+fn status_cell(files: &[FileDiff], index: usize) -> (char, Color) {
+    let status = files.get(index).map(|f| f.change.status);
+    let marker = status.map(Status::marker).unwrap_or('?');
+    let color = match status {
         Some(Status::Added) => Color::Green,
         Some(Status::Deleted) => Color::Red,
         Some(Status::Renamed) | Some(Status::Copied) => Color::Cyan,
         _ => Color::Yellow,
-    }
+    };
+    (marker, color)
 }
 
-/// Review marker span (✓ reviewed, ⚠ changed-since, blank otherwise).
-/// On the selected row we drop the fg color so the reversed highlight stays
-/// uniform (a colored fg would invert into a colored background block).
-fn review_span(status: ReviewStatus, row_style: Style, selected: bool) -> Span<'static> {
-    let glyph = match status {
-        ReviewStatus::Reviewed => "✓ ",
-        ReviewStatus::ChangedSinceReviewed => "⚠ ",
-        ReviewStatus::Unreviewed => "  ",
-    };
-    let style = match (status, selected) {
-        (_, true) | (ReviewStatus::Unreviewed, _) => row_style,
-        (ReviewStatus::Reviewed, _) => row_style.fg(Color::Green),
-        (ReviewStatus::ChangedSinceReviewed, _) => row_style.fg(Color::Yellow),
-    };
-    Span::styled(glyph, style)
+/// Review marker cell (✓ reviewed, ⚠ changed-since, blank otherwise).
+fn review_cell(status: ReviewStatus) -> Option<(char, Color)> {
+    match status {
+        ReviewStatus::Reviewed => Some(('✓', Color::Green)),
+        ReviewStatus::ChangedSinceReviewed => Some(('⚠', Color::Yellow)),
+        ReviewStatus::Unreviewed => None,
+    }
 }
 
 /// Render the file tree into `area`. `cursor` is the selected visible-row index;
@@ -169,59 +158,42 @@ pub fn render(
     f.render_widget(block, area);
 
     let height = inner.height as usize;
+    let width = inner.width as usize;
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(scroll).take(height) {
-        let indent = "  ".repeat(row.depth);
         let selected = i == cursor;
-        let row_style = if selected {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
-
-        // On the selected row, fg colors are dropped so the reversed highlight
-        // stays uniform (a colored fg inverts into a colored background block).
-        let mut spans = match &row.kind {
-            RowKind::Dir { expanded, .. } => {
-                let arrow = if *expanded { '▾' } else { '▸' };
-                let style = if selected {
-                    row_style
-                } else {
-                    row_style.fg(Color::Blue)
-                };
-                vec![Span::styled(
-                    format!("{indent}{arrow} {}/", row.label),
-                    style,
-                )]
-            }
+        let line = match &row.kind {
+            RowKind::Dir { expanded, .. } => super::tree_row_line(
+                width,
+                selected,
+                row.depth,
+                None,
+                None,
+                Some(*expanded),
+                &row.label,
+                Some(Color::Blue),
+            ),
             RowKind::File { index } => {
-                let status = statuses
-                    .get(*index)
-                    .copied()
-                    .unwrap_or(ReviewStatus::Unreviewed);
-                let marker_style = if selected {
-                    row_style
-                } else {
-                    row_style.fg(marker_color(files, *index))
-                };
-                vec![
-                    Span::styled(indent, row_style),
-                    review_span(status, row_style, selected),
-                    Span::styled(format!("{} ", status_marker(files, *index)), marker_style),
-                    Span::styled(row.label.clone(), row_style),
-                ]
+                let review = review_cell(
+                    statuses
+                        .get(*index)
+                        .copied()
+                        .unwrap_or(ReviewStatus::Unreviewed),
+                );
+                let (marker, color) = status_cell(files, *index);
+                super::tree_row_line(
+                    width,
+                    selected,
+                    row.depth,
+                    review,
+                    Some((marker, color)),
+                    None,
+                    &row.label,
+                    Some(color),
+                )
             }
         };
-
-        // Extend the row to the full panel width so the selected row's highlight
-        // spans the whole panel, not just the text.
-        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        let width = inner.width as usize;
-        if used < width {
-            spans.push(Span::styled(" ".repeat(width - used), row_style));
-        }
-
-        lines.push(Line::from(spans));
+        lines.push(line);
     }
 
     f.render_widget(Paragraph::new(lines), inner);

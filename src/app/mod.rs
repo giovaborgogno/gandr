@@ -425,7 +425,7 @@ impl App {
 
     /// Whether the working tree is being watched (live comparison + auto-refresh).
     pub fn is_watching(&self) -> bool {
-        self.auto_refresh && self.spec.is_live()
+        !self.files_only && self.auto_refresh && self.spec.is_live()
     }
 
     /// The active context-fold window (3 = default/tightest).
@@ -948,7 +948,12 @@ impl App {
     }
 
     /// Request an async refresh (the event loop spawns the background job).
+    /// No-op in files-only mode: there is no git comparison to recompute, and
+    /// the `NullBackend` would just churn an empty diff on every disk event.
     pub fn request_refresh(&mut self) {
+        if self.files_only {
+            return;
+        }
         self.refresh_epoch += 1;
         self.pending_refresh = Some(self.refresh_epoch);
         self.loading = true;
@@ -1817,7 +1822,13 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     jobs::spawn_input(tx.clone(), std::sync::Arc::clone(&input_paused));
 
     // Watch the working tree (best-effort), forwarding changes onto the channel.
-    let watch = watcher::watch(&root).ok();
+    // Skip it entirely in files-only mode: there is no comparison to refresh, and
+    // a non-git folder (the "replace yazi" use case) can be a large tree to watch.
+    let watch = if app.files_only() {
+        None
+    } else {
+        watcher::watch(&root).ok()
+    };
     if let Some(w) = &watch {
         let (wtx, wrx) = (tx.clone(), w.rx.clone());
         std::thread::spawn(move || {
@@ -1888,7 +1899,7 @@ fn run_loop(
             Ok(jobs::AppEvent::Term(Event::Resize(_, _))) => dirty = true,
             Ok(jobs::AppEvent::Term(_)) => {}
             Ok(jobs::AppEvent::FileChanged) => {
-                if app.auto_refresh() && app.spec_is_live() {
+                if app.is_watching() {
                     app.request_refresh();
                 }
             }

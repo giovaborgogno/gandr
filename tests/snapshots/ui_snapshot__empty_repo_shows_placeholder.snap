@@ -1,16 +1,17 @@
 ---
 source: tests/ui_snapshot.rs
+assertion_line: 76
 expression: "frame(&app, 80, 12)"
 ---
 " Diff [1]   Repo [2]                                     main · uncommitted · ◉ "
 "────────────────────────────────────────────────────────────────────────────────"
-"┌ Changes  +0 −0  0/0 ─────────┐┌──────────────────────────────────────────────┐"
-"│                              ││            ✓  No changes to review           │"
-"│                              ││          your working tree is clean          │"
-"│                              ││                                              │"
-"│                              ││            c  compare against…               │"
-"│                              ││            b  pick a branch or tag           │"
-"│                              ││            2  browse the repository          │"
-"│                              ││            r  refresh                        │"
-"└──────────────────────────────┘└──────────────────────────────────────────────┘"
+"┌ Changes  +0 −0  0/0 ───────────┐┌────────────────────────────────────────────┐"
+"│                                ││           ✓  No changes to review          │"
+"│                                ││         your working tree is clean         │"
+"│                                ││                                            │"
+"│                                ││           c  compare against…              │"
+"│                                ││           b  pick a branch or tag          │"
+"│                                ││           2  browse the repository         │"
+"│                                ││           r  refresh                       │"
+"└────────────────────────────────┘└────────────────────────────────────────────┘"
 "]/[ hunk  n/p file  Space review  s split  / find  c compare  ? help            "
