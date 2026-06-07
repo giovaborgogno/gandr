@@ -1363,9 +1363,10 @@ impl App {
         });
     }
 
-    /// Open the diff-scoped file finder (`f` in the Diff tab): fuzzy over the
-    /// changed files, jumping within the diff (it never leaves the Diff tab).
-    fn open_diff_file_finder(&mut self) {
+    /// Open the diff-scoped finder (`f`/`F` in the Diff tab): smart-case match
+    /// over the changed files by name (`Files`) or contents (`Content`), jumping
+    /// within the diff (it never leaves the Diff tab). `Tab` toggles the mode.
+    fn open_diff_finder(&mut self, mode: SearchMode) {
         self.search = None;
         self.quickfix = None;
         self.browser_query = None;
@@ -1373,12 +1374,22 @@ impl App {
         self.pending_search = None;
         self.repo_search = Some(RepoSearch {
             query: String::new(),
-            mode: SearchMode::Files,
+            mode,
             scope: SearchScope::DiffFiles,
-            results: SearchResults::Files(Vec::new()),
+            results: Self::empty_results(mode),
             selected: 0,
             loading: false,
         });
+    }
+
+    /// Whether `hay` matches `query` under smart-case (case-insensitive unless the
+    /// query has an uppercase char), the same rule as the repo-wide search.
+    fn smart_match(query: &str, hay: &str) -> bool {
+        if query.chars().any(|c| c.is_uppercase()) {
+            hay.contains(query)
+        } else {
+            hay.to_lowercase().contains(query)
+        }
     }
 
     /// Changed-file paths matching `query` (smart-case substring), for the
@@ -1388,24 +1399,36 @@ impl App {
         if query.is_empty() {
             return Vec::new();
         }
-        let sensitive = query.chars().any(|c| c.is_uppercase());
-        let needle = if sensitive {
-            query.to_string()
-        } else {
-            query.to_lowercase()
-        };
         self.files
             .iter()
             .map(|f| f.change.path.clone())
-            .filter(|p| {
-                let hay = p.to_string_lossy();
-                if sensitive {
-                    hay.contains(&needle)
-                } else {
-                    hay.to_lowercase().contains(&needle)
-                }
-            })
+            .filter(|p| Self::smart_match(query, &p.to_string_lossy()))
             .collect()
+    }
+
+    /// Lines of the changed files' (new) content matching `query`, for the
+    /// diff-scoped content finder — computed synchronously from the diff.
+    fn diff_content_matches(&self, query: &str) -> Vec<crate::search::ContentMatch> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for f in &self.files {
+            for (i, line) in f.new_text.lines().enumerate() {
+                if Self::smart_match(query, line) {
+                    out.push(crate::search::ContentMatch {
+                        path: f.change.path.clone(),
+                        line: (i + 1) as u64,
+                        text: line.to_string(),
+                    });
+                    if out.len() >= crate::search::MAX_RESULTS {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Open the in-view find (`/`): searches the diff (Diff tab) or the open
@@ -1486,7 +1509,11 @@ impl App {
         // The diff-scoped finder searches the in-memory changed files — resolve
         // it synchronously, no background job.
         if rs.scope == SearchScope::DiffFiles {
-            let results = SearchResults::Files(self.diff_file_matches(&rs.query.clone()));
+            let q = rs.query.clone();
+            let results = match rs.mode {
+                SearchMode::Files => SearchResults::Files(self.diff_file_matches(&q)),
+                SearchMode::Content => SearchResults::Content(self.diff_content_matches(&q)),
+            };
             if let Some(rs) = self.repo_search.as_mut() {
                 rs.results = results;
                 rs.loading = false;
@@ -1549,21 +1576,40 @@ impl App {
     /// Jump to the selected result: reveal it in the browser (at its line for a
     /// content hit), focus the content pane, and close the overlay.
     fn jump_to_result(&mut self) {
-        // Diff-scoped finder: the selected result is a changed file — select it
-        // in the diff and stay on the Diff tab (no Repo detour).
+        // Diff-scoped finder: jump within the diff, staying on the Diff tab.
         if self.repo_search.as_ref().map(|rs| rs.scope) == Some(SearchScope::DiffFiles) {
-            let picked = self.repo_search.as_ref().and_then(|rs| match &rs.results {
-                SearchResults::Files(v) => v.get(rs.selected).cloned(),
-                SearchResults::Content(_) => None,
+            // (path, optional new-file line for a content hit), plus the query.
+            let picked = self.repo_search.as_ref().map(|rs| {
+                let hit = match &rs.results {
+                    SearchResults::Files(v) => v.get(rs.selected).map(|p| (p.clone(), None)),
+                    SearchResults::Content(v) => v
+                        .get(rs.selected)
+                        .map(|m| (m.path.clone(), Some(m.line as u32))),
+                };
+                (hit, rs.query.clone())
             });
-            if let Some(path) = picked {
-                if let Some(idx) = self.files.iter().position(|f| f.change.path == path) {
-                    self.select_file(idx);
-                    self.focus = Focus::Diff;
-                }
-            }
             self.repo_search = None;
             self.pending_search = None;
+            if let Some((Some((path, line)), query)) = picked {
+                match line {
+                    // Content hit: position the diff at the line and arm n/N over
+                    // the diff (reusing the `/` search) so it walks every match.
+                    Some(l) if self.focus_diff_at(&path, l) => {
+                        self.focus = Focus::Diff;
+                        self.search = (!query.is_empty()).then_some(Search {
+                            query,
+                            editing: false,
+                        });
+                    }
+                    // File-name hit (or a content line not visible in the fold).
+                    _ => {
+                        if let Some(idx) = self.files.iter().position(|f| f.change.path == path) {
+                            self.select_file(idx);
+                            self.focus = Focus::Diff;
+                        }
+                    }
+                }
+            }
             return;
         }
         // A content search opens a quickfix list (every match across the repo);
@@ -1690,12 +1736,9 @@ impl App {
                 self.pending_search = None;
             }
             KeyCode::Tab => {
-                // Mode toggle only applies to the repo-wide finder; the
-                // diff-scoped finder is file-name-only.
+                // Toggle file-name ⇄ content; both scopes support both modes.
                 if let Some(rs) = self.repo_search.as_mut() {
-                    if rs.scope == SearchScope::Repo {
-                        rs.mode = rs.mode.toggled();
-                    }
+                    rs.mode = rs.mode.toggled();
                 }
                 self.request_search();
             }
@@ -1976,20 +2019,23 @@ impl App {
                 }
                 return;
             }
-            // Finder: `f` by file name, `F` by content. `f` is contextual — in
-            // the Diff tab it searches only the changed files and jumps within
-            // the diff; elsewhere it's repo-wide. `F` (content) is always
-            // repo-wide. `Tab` toggles the mode while a repo finder is open.
+            // Finder: `f` by file name, `F` by content — both contextual. In the
+            // Diff tab they search only the changed files and jump within the
+            // diff; in the Repo tab they're repo-wide. `Tab` toggles the mode.
             KeyCode::Char('f') => {
                 if self.tab == Tab::Diff {
-                    self.open_diff_file_finder();
+                    self.open_diff_finder(SearchMode::Files);
                 } else {
                     self.open_finder(SearchMode::Files);
                 }
                 return;
             }
             KeyCode::Char('F') => {
-                self.open_finder(SearchMode::Content);
+                if self.tab == Tab::Diff {
+                    self.open_diff_finder(SearchMode::Content);
+                } else {
+                    self.open_finder(SearchMode::Content);
+                }
                 return;
             }
             _ => {}

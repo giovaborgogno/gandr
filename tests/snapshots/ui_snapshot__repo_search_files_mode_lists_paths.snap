@@ -1,10 +1,10 @@
 ---
 source: tests/ui_snapshot.rs
-assertion_line: 467
+assertion_line: 469
 expression: "frame(&app, 90, 18)"
 ---
 " Diff [1]   Repo [2]                                               main · uncommitted · ◉ "
-"──┌Search [files] · 2 results · Tab: switch mode───────────────────────────────────────┐──"
+"──┌Find repo [files] · 2 results · Tab: switch mode────────────────────────────────────┐──"
 "┌R│> rs                                                                                │─┐"
 "│▸│src/lib.rs                                                                          │ │"
 "│ │src/main.rs                                                                         │ │"

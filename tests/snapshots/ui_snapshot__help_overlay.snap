@@ -1,6 +1,6 @@
 ---
 source: tests/ui_snapshot.rs
-assertion_line: 339
+assertion_line: 340
 expression: "frame(&app, 72, 20)"
 ---
 " Diff ┌Keys──────────────────────────────────────────────────────┐d · ◉ "
@@ -18,7 +18,7 @@ expression: "frame(&app, 72, 20)"
 "│     │ Space           mark reviewed                            │     │"
 "│     │ c / b           compare · branch/tag picker              │     │"
 "│     │ /               find in view: diff / open file (n / N)   │     │"
-"│     │ f / F           find file (diff: changed) / grep repo    │     │"
+"│     │ f / F           find by name / contents (diff or repo)   │     │"
 "│     │ v / y           select lines / copy (diff & preview)     │     │"
 "│     │ e               open in $EDITOR                          │     │"
 "└─────│ r / a           refresh · auto-refresh                   │─────┘"

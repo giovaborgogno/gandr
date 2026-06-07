@@ -20,13 +20,15 @@ yazi `s`/`S`, nvim telescope/`:grep`+quickfix). `/` never changes meaning by con
      views differ (the Diff view *is* the multi-file changeset; the Repo preview is one
      file). Commit (`Enter`) lands on the first match at-or-after the cursor; `n`/`N`
      step strictly after/before, wrapping.
-2. **The finder is `f` (by file name) / `F` (by contents); `Tab` toggles the mode.**
-   `f` is **contextual**: in the Diff tab it searches only the *changed files* and jumps
-   within the diff (never leaving the tab); elsewhere (and `F` always) it's repo-wide and
-   lands in the Repo preview.
-3. **Repo-wide content search opens a quickfix list.** After an `F` jump, `n`/`N` step
-   **every match across the whole repo**, crossing files (the nvim `:grep` → `:cnext`
-   model). The keybar shows `[i/n] across repo`; `Esc` closes the list.
+2. **The finder is `f` (by file name) / `F` (by contents); `Tab` toggles the mode.** Both
+   are **contextual**: in the Diff tab they search only the *changed files* and jump within
+   the diff (never leaving the tab); in the Repo tab they're repo-wide and land in the Repo
+   preview.
+3. **Match-stepping after a jump matches the corpus.** A repo-wide content (`F`) jump opens
+   a quickfix list — `n`/`N` step **every match across the whole repo**, crossing files
+   (the nvim `:grep` → `:cnext` model); the keybar shows `[i/n] across repo`, `Esc` closes
+   it. A diff-scoped content jump instead arms the in-view `/` search, so `n`/`N` walk every
+   match across the changed files.
 4. **One search active at a time ("last wins").** Opening `/`, `f`, or `F` clears the
    others (the in-view find, the finder overlay, and the quickfix list), so `n`/`N` is
    never ambiguous.

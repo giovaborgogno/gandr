@@ -236,19 +236,16 @@ fn render_repo_search(f: &mut Frame, area: Rect, rs: &crate::app::RepoSearch) {
     };
 
     let loading = if rs.loading { " · …" } else { "" };
-    let title = match rs.scope {
-        crate::app::SearchScope::DiffFiles => format!(
-            "Find changed file · {} results{}",
-            rs.results.len(),
-            loading
-        ),
-        crate::app::SearchScope::Repo => format!(
-            "Search [{}] · {} results{} · Tab: switch mode",
-            rs.mode.label(),
-            rs.results.len(),
-            loading
-        ),
+    let scope = match rs.scope {
+        crate::app::SearchScope::DiffFiles => "changed",
+        crate::app::SearchScope::Repo => "repo",
     };
+    let title = format!(
+        "Find {scope} [{}] · {} results{} · Tab: switch mode",
+        rs.mode.label(),
+        rs.results.len(),
+        loading
+    );
     let block = Block::bordered()
         .title(title)
         .border_style(Style::default().fg(Color::Cyan));
@@ -516,7 +513,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("Space", "mark reviewed"),
         ("c / b", "compare · branch/tag picker"),
         ("/", "find in view: diff / open file (n / N)"),
-        ("f / F", "find file (diff: changed) / grep repo"),
+        ("f / F", "find by name / contents (diff or repo)"),
         ("v / y", "select lines / copy (diff & preview)"),
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),

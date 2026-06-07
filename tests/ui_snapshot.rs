@@ -649,6 +649,7 @@ fn content_finder_quickfix_walks_matches_across_files() {
     fx.commit("init");
     let mut app = app_from(&fx);
     let root = app.context().root.clone();
+    app.handle_key(key('2')); // Repo tab — F is repo-wide here (contextual otherwise)
     app.handle_key(key('F')); // repo-wide content finder
     for c in "needle".chars() {
         app.handle_key(key(c));
@@ -670,6 +671,43 @@ fn content_finder_quickfix_walks_matches_across_files() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())); // clears quickfix
     assert!(app.quickfix().is_none());
     assert_eq!(app.browser_query(), None);
+}
+
+#[test]
+fn shift_f_in_diff_tab_searches_changed_contents_and_jumps_in_place() {
+    use gandr::app::{SearchScope, Tab};
+    let fx = Fixture::new();
+    fx.write("a.txt", "alpha\nbeta\ngamma\n");
+    fx.commit("init");
+    fx.write("a.txt", "alpha\nbeta NEEDLE\ngamma\n"); // adds NEEDLE on line 2
+    let mut app = app_from(&fx);
+    app.handle_key(key('F')); // diff-scoped *content* finder
+    assert_eq!(
+        app.repo_search().map(|rs| rs.scope),
+        Some(SearchScope::DiffFiles),
+        "F in the Diff tab searches the changed files, not the whole repo"
+    );
+    for c in "NEEDLE".chars() {
+        app.handle_key(key(c));
+    }
+    // Diff-scoped results resolve synchronously (no background job).
+    assert_eq!(
+        app.repo_search().map(|rs| rs.results.len()),
+        Some(1),
+        "one content match in the changed file"
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert_eq!(app.tab(), Tab::Diff, "the jump stays in the Diff tab");
+    assert!(app.repo_search().is_none(), "the finder closes on jump");
+    assert!(
+        app.current()
+            .is_some_and(|f| f.change.path.ends_with("a.txt")),
+        "the diff is on the matched file"
+    );
+    assert!(
+        app.search().is_some(),
+        "a content jump arms n/N over the diff"
+    );
 }
 
 #[test]
