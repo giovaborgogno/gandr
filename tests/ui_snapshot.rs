@@ -708,6 +708,34 @@ fn tree_nav_wraps_around() {
 // ---- edge cases: render without panic ----
 
 #[test]
+fn untracked_embedded_repo_dir_does_not_crash_startup() {
+    // A vendored folder that is itself a git repo (e.g. installed skills under
+    // `.claude/skills/<name>/`) — git surfaces it as a single untracked
+    // *directory* delta. gandr must skip it, not try to read a directory as a
+    // file and take the whole app down at startup.
+    let fx = Fixture::new();
+    fx.write("a.txt", "x\n");
+    fx.commit("init");
+    let vend = fx.path().join("vendored");
+    std::fs::create_dir_all(&vend).unwrap();
+    std::fs::write(vend.join("note.txt"), "hi\n").unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&vend)
+        .status()
+        .unwrap();
+    let backend = Box::new(Git2Backend::open(fx.path()).unwrap());
+    let app = App::new(Config::default(), backend, CompareSpec::Uncommitted)
+        .expect("an embedded-repo directory must not crash App::new");
+    assert!(
+        !app.files()
+            .iter()
+            .any(|f| f.change.path.starts_with("vendored")),
+        "the embedded-repo directory should be skipped, not listed as a file"
+    );
+}
+
+#[test]
 fn binary_file_diff_shows_indicator() {
     let fx = Fixture::new();
     fx.write_bytes("data.bin", &[0u8, 159, 146, 150, 1, 2, 3]);

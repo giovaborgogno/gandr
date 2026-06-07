@@ -145,6 +145,12 @@ impl Git2Backend {
             .workdir()
             .context("bare repositories have no working tree")?;
         let full = workdir.join(path);
+        // A path that resolves to a directory (an untracked dir / embedded repo
+        // git surfaced as a change) is not a readable blob — treat as absent
+        // instead of erroring out and taking the whole app down.
+        if full.is_dir() {
+            return Ok(None);
+        }
         match std::fs::read(&full) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -202,6 +208,15 @@ impl GitBackend for Git2Backend {
                 (None, Some(p)) => p.clone(),
                 (None, None) => continue,
             };
+            // Git can surface an untracked *directory* as a single delta — a
+            // vendored folder or an embedded repo it won't recurse into (e.g.
+            // `.claude/skills/<name>/`). It isn't a reviewable file, so skip it
+            // rather than trying (and failing) to read a directory as a blob.
+            if let Some(wd) = self.repo.workdir() {
+                if wd.join(&path).is_dir() {
+                    continue;
+                }
+            }
             let is_binary = delta.new_file().is_binary() || delta.old_file().is_binary();
             let (additions, deletions) = match git2::Patch::from_diff(&diff, idx) {
                 Ok(Some(patch)) => {
