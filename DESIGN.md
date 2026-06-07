@@ -85,7 +85,8 @@ uncommitted diff.
 | `c` | open compare picker |
 | `Space` | mark file reviewed |
 | `o` | collapse / expand file or context block |
-| `/` | **contextual** search: filter files (tree focus) / search diff text (diff focus); `n`/`N` next/prev match |
+| `/` | **find in the current view** (diff: whole changeset · Repo: open file); `n`/`N` next/prev match (see ADR 0007) |
+| `f` `F` | **find in the repo**: by file name (`f`) / by contents (`F`); `Tab` toggles mode. Works from either tab |
 | `e` | open file in `$EDITOR` at the current line |
 | `y` | copy path / selection |
 | `r` | manual refresh · `a` toggle auto-refresh |

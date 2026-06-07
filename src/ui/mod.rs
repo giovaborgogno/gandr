@@ -38,10 +38,10 @@ const KEYBAR: &[(&str, &str)] = &[
 /// Essential key hints for the Files tab.
 const KEYBAR_FILES: &[(&str, &str)] = &[
     ("Enter", "open"),
-    ("h/l", "fold"),
-    ("/", "search"),
+    ("h/l", "enter/exit"),
+    ("/", "find"),
+    ("f/F", "find repo"),
     ("v/y", "copy"),
-    ("1", "diff"),
     ("?", "help"),
 ];
 
@@ -489,7 +489,8 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("o", "context window 3→10→30→100"),
         ("Space", "mark reviewed"),
         ("c / b", "compare · branch/tag picker"),
-        ("/", "find across all files (n / N)"),
+        ("/", "find in view: diff / open file (n / N)"),
+        ("f / F", "find repo: file name / contents"),
         ("v / y", "select lines / copy (Repo preview)"),
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),

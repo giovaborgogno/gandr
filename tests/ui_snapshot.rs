@@ -439,7 +439,7 @@ fn repo_search_content_lists_matches() {
     let root = app.context().root.clone();
 
     app.handle_key(key('2')); // Files tab
-    app.handle_key(key('/')); // open repo search (content mode)
+    app.handle_key(key('F')); // open the repo-wide finder in content mode
     for c in "greet".chars() {
         app.handle_key(key(c));
     }
@@ -458,8 +458,8 @@ fn repo_search_files_mode_lists_paths() {
     let root = app.context().root.clone();
 
     app.handle_key(key('2')); // Files tab
-    app.handle_key(key('/')); // open repo search
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // → file-name mode
+    app.handle_key(key('F')); // open the finder (content mode)
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // Tab → file-name mode
     for c in "rs".chars() {
         app.handle_key(key(c));
     }
@@ -478,7 +478,7 @@ fn repo_search_jumps_to_result() {
     let root = app.context().root.clone();
 
     app.handle_key(key('2'));
-    app.handle_key(key('/'));
+    app.handle_key(key('F')); // repo-wide content finder
     for c in "greet".chars() {
         app.handle_key(key(c));
     }
@@ -493,7 +493,7 @@ fn repo_search_jumps_to_result() {
 }
 
 #[test]
-fn files_content_search_keeps_query_and_navigates() {
+fn finder_content_jump_keeps_query_and_navigates() {
     let fx = Fixture::new();
     // "needle" on lines 1 and 4.
     fx.write(
@@ -505,7 +505,7 @@ fn files_content_search_keeps_query_and_navigates() {
     let root = app.context().root.clone();
 
     app.handle_key(key('2')); // Files
-    app.handle_key(key('/')); // content search
+    app.handle_key(key('F')); // repo-wide content finder
     for c in "needle".chars() {
         app.handle_key(key(c));
     }
@@ -522,6 +522,63 @@ fn files_content_search_keeps_query_and_navigates() {
     // Switching to the Diff tab clears the preview highlight.
     app.handle_key(key('1'));
     assert_eq!(app.browser_query(), None);
+}
+
+#[test]
+fn slash_searches_the_open_preview_file_in_the_repo_tab() {
+    // `/` in the Repo tab finds within the open file (in-view), not the repo —
+    // live highlight + n/N within the file. The repo-wide finder is f/F.
+    let fx = Fixture::new();
+    fx.write(
+        "a.rs",
+        "let needle = 1;\nlet b = 2;\nlet c = 3;\nlet needle2 = 4;\n",
+    );
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // open a.rs preview
+    app.handle_key(key('/')); // in-file find
+    assert!(
+        app.repo_search().is_none(),
+        "/ must not open the repo finder"
+    );
+    for c in "needle".chars() {
+        app.handle_key(key(c));
+    }
+    // Live highlight tracks the query while typing.
+    assert_eq!(app.browser_query(), Some("needle"));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // jump to first match
+    assert_eq!(app.browser().content_cursor(), 0);
+    app.handle_key(key('n')); // next match within the file
+    assert_eq!(app.browser().content_cursor(), 3);
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())); // Esc clears the find
+    assert_eq!(app.browser_query(), None);
+}
+
+#[test]
+fn finder_opens_in_file_or_content_mode_and_tab_toggles() {
+    use gandr::search::SearchMode;
+    let fx = Fixture::new();
+    fx.write("a.rs", "x\n");
+    fx.commit("init");
+    let mut app = app_from(&fx); // Diff tab — the finder is global
+    app.handle_key(key('f')); // file-name mode
+    assert_eq!(
+        app.repo_search().map(|rs| rs.mode),
+        Some(SearchMode::Files),
+        "f opens the finder in file-name mode"
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // Tab → content
+    assert_eq!(
+        app.repo_search().map(|rs| rs.mode),
+        Some(SearchMode::Content)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    app.handle_key(key('F')); // content mode directly
+    assert_eq!(
+        app.repo_search().map(|rs| rs.mode),
+        Some(SearchMode::Content)
+    );
 }
 
 // ---- M12 (diff viewer): multi-line syntax highlighting ----

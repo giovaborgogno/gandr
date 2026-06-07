@@ -51,13 +51,15 @@ stream into gandr (right): review the diff and search the whole repo without bre
 - **Live auto-refresh** as files change on disk.
 - **Review tracking**: mark files reviewed; persists per-repo; flags files that changed
   after you reviewed them.
-- In-diff search (`/`) that jumps across **all** changed files.
+- In-diff find (`/`) that jumps across **all** changed files (`n`/`N`).
 
 **Repo tab — browse the whole tree**
 - Lazy file tree of the entire working tree (only `.git/` is skipped), with a
   syntax-highlighted, line-cursored preview.
-- **Repo-wide search** (`/`): file names (fd-style, respects `.gitignore`) or file
-  contents (ripgrep's engine) — jump straight to the file and line. No external binaries.
+- **Find in the open file** (`/`): in-view search of the preview, `n`/`N` to step.
+- **Repo-wide finder** (`f` / `F`): by file name (fd-style, respects `.gitignore`) or by
+  contents (ripgrep's engine) — jump straight to the file and line. Works from either tab.
+  No external binaries.
 
 **Everywhere**
 - Theme auto-detected from your terminal background (light/dark).
@@ -90,12 +92,13 @@ Press `2` for the **Repo** browser, `1` to go back to the **Diff** reviewer.
 | `j`/`k`, `↑`/`↓` | move / scroll · `g`/`G` top/bottom · `Ctrl-d`/`u` half-page |
 | `Tab` | switch tree ↔ content focus |
 | `n`/`p` | next / previous file · `]`/`[` next / previous hunk |
-| `h`/`l` | collapse / expand directory · `Enter` open file / expand fold |
+| `h`/`l`, `←`/`→` | enter / exit file · collapse / expand directory · `Enter` open / expand fold |
 | `s` · `w` · `o` | side-by-side · word highlight · expand context |
 | `Space` | mark file reviewed |
 | `c` · `b` | compare menu · branch/tag picker |
-| `/` (then `n`/`N`) | search · `e` open in `$EDITOR` · `z` hide tree |
-| `1` / `2` | Diff / Repo tab · `?` help · `q` quit |
+| `/` (then `n`/`N`) | find in the current view (the diff, or the open file) |
+| `f` · `F` | find in the repo: by file name · by contents (`Tab` toggles) |
+| `1` / `2` | Diff / Repo tab · `e` open in `$EDITOR` · `z` hide tree · `?` help · `q` quit |
 
 ## Install
 

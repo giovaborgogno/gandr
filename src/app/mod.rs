@@ -1157,6 +1157,14 @@ impl App {
     /// Position of the cursor among the search matches as (1-based index, total),
     /// for the keybar; `None` when not searching or the cursor isn't on a match.
     pub fn search_match_position(&self) -> Option<(usize, usize)> {
+        if self.tab == Tab::Files {
+            let q = self.search.as_ref().filter(|s| !s.query.is_empty())?;
+            let matches = self.browser.match_lines(&q.query);
+            let idx = matches
+                .iter()
+                .position(|&l| l == self.browser.content_cursor())?;
+            return Some((idx + 1, matches.len()));
+        }
         let matches = self.search_matches();
         if matches.is_empty() {
             return None;
@@ -1165,27 +1173,43 @@ impl App {
         Some((idx + 1, matches.len()))
     }
 
-    /// Total number of search matches in the current file's diff.
+    /// Total number of search matches in the current view (diff, or preview file).
     pub fn search_match_count(&self) -> usize {
+        if self.tab == Tab::Files {
+            return match self.search.as_ref() {
+                Some(s) if !s.query.is_empty() => self.browser.match_lines(&s.query).len(),
+                _ => 0,
+            };
+        }
         self.search_matches().len()
     }
 
     /// Route a key to search mode; returns whether it was handled.
     fn search_key(&mut self, key: KeyEvent) -> bool {
-        let Some(search) = self.search.as_mut() else {
+        let Some(editing) = self.search.as_ref().map(|s| s.editing) else {
             return false;
         };
-        if search.editing {
+        if editing {
             match key.code {
-                KeyCode::Char(c) => search.query.push(c),
+                KeyCode::Char(c) => {
+                    if let Some(s) = self.search.as_mut() {
+                        s.query.push(c);
+                    }
+                    self.sync_search_highlight();
+                }
                 KeyCode::Backspace => {
-                    search.query.pop();
+                    if let Some(s) = self.search.as_mut() {
+                        s.query.pop();
+                    }
+                    self.sync_search_highlight();
                 }
                 KeyCode::Enter => {
-                    search.editing = false;
-                    self.search_jump(true);
+                    if let Some(s) = self.search.as_mut() {
+                        s.editing = false;
+                    }
+                    self.search_commit();
                 }
-                KeyCode::Esc => self.search = None,
+                KeyCode::Esc => self.close_search(),
                 _ => {}
             }
             true
@@ -1193,15 +1217,15 @@ impl App {
             // Navigating matches: n/N move, Esc closes; other keys pass through.
             match key.code {
                 KeyCode::Char('n') => {
-                    self.search_jump(true);
+                    self.search_advance(true);
                     true
                 }
                 KeyCode::Char('N') => {
-                    self.search_jump(false);
+                    self.search_advance(false);
                     true
                 }
                 KeyCode::Esc => {
-                    self.search = None;
+                    self.close_search();
                     true
                 }
                 _ => false,
@@ -1222,11 +1246,13 @@ impl App {
     /// Open the repo-wide search overlay (defaults to content search). Bumps the
     /// search epoch so a result from a previous (closed) search can't land in the
     /// freshly opened, empty overlay.
-    fn open_repo_search(&mut self) {
+    /// Open the repo-wide finder (`f`/`F`) in the given mode. Closes any in-view
+    /// `/` find first so only one search owns `n`/`N` at a time (option B).
+    fn open_finder(&mut self, mode: SearchMode) {
+        self.search = None;
         self.search_epoch += 1;
         self.pending_search = None;
         self.browser_query = None; // a new search supersedes the old highlight
-        let mode = SearchMode::Content;
         self.repo_search = Some(RepoSearch {
             query: String::new(),
             mode,
@@ -1234,6 +1260,74 @@ impl App {
             selected: 0,
             loading: false,
         });
+    }
+
+    /// Open the in-view find (`/`): searches the diff (Diff tab) or the open
+    /// preview file (Repo tab). Closes the finder first (option B).
+    fn open_search(&mut self) {
+        self.repo_search = None;
+        self.pending_search = None;
+        self.browser_query = None;
+        self.search = Some(Search {
+            query: String::new(),
+            editing: true,
+        });
+    }
+
+    /// Close the in-view find and drop its preview highlight.
+    fn close_search(&mut self) {
+        self.search = None;
+        self.browser_query = None;
+    }
+
+    /// In the Repo tab, mirror the `/` query into the live preview highlight.
+    fn sync_search_highlight(&mut self) {
+        if self.tab == Tab::Files {
+            self.browser_query = self
+                .search
+                .as_ref()
+                .map(|s| s.query.clone())
+                .filter(|q| !q.is_empty());
+        }
+    }
+
+    /// Commit the query (on `Enter`): jump to the first match at-or-after the
+    /// cursor, so a fresh search lands on the first visible match (like vim `/`).
+    fn search_commit(&mut self) {
+        if self.tab == Tab::Files {
+            self.sync_search_highlight();
+            self.browser_search_first();
+        } else {
+            self.search_jump(true);
+        }
+    }
+
+    /// Advance the in-view find to the next/previous match in the current view's
+    /// corpus: the whole diff (Diff tab) or the open preview file (Repo tab).
+    fn search_advance(&mut self, forward: bool) {
+        if self.tab == Tab::Files {
+            self.sync_search_highlight();
+            self.browser_search_jump(forward);
+        } else {
+            self.search_jump(forward);
+        }
+    }
+
+    /// Jump the preview to the first line at-or-after the cursor matching
+    /// `browser_query` (wrapping), used when committing an in-file `/` search.
+    fn browser_search_first(&mut self) {
+        let Some(q) = self.browser_query.clone() else {
+            return;
+        };
+        let matches = self.browser.match_lines(&q);
+        let cur = self.browser.content_cursor();
+        let target = matches
+            .iter()
+            .find(|&&l| l >= cur)
+            .or_else(|| matches.first());
+        if let Some(&line) = target {
+            self.browser.scroll_content_to(line);
+        }
     }
 
     /// Queue an async search for the current query/mode (or clear results when
@@ -1311,7 +1405,15 @@ impl App {
         });
         if let Some((abs, line)) = target {
             self.browser.reveal(&abs, line);
-            self.browser_query = query;
+            // A content jump becomes a committed in-file `/` search of that file,
+            // so the keybar shows the match counter and n/N flow through the one
+            // search state machine (option B) — not a parallel browser_query path.
+            self.browser_query = query.clone();
+            self.search = query.map(|q| Search {
+                query: q,
+                editing: false,
+            });
+            self.tab = Tab::Files; // a finder jump always lands in the Repo preview
             self.focus = Focus::Diff; // focus the content pane
             self.repo_search = None;
             self.pending_search = None;
@@ -1569,8 +1671,8 @@ impl App {
             return;
         }
 
-        // The repo-search overlay (Files tab) captures all keys while open, so
-        // typing the query isn't intercepted by the global single-key shortcuts.
+        // The repo-wide finder overlay (f/F, either tab) captures all keys while
+        // open, so typing the query isn't intercepted by the global shortcuts.
         if self.repo_search_key(key) {
             return;
         }
@@ -1578,8 +1680,13 @@ impl App {
         if self.ref_picker_key(key) {
             return;
         }
+        // The in-view find (`/`, either tab) captures input while editing the
+        // query or navigating matches — before the global single-key shortcuts.
+        if self.search_key(key) {
+            return;
+        }
 
-        // Global keys (both tabs): quit, help, tab switching.
+        // Global keys (both tabs): quit, help, tab switching, finders.
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -1605,6 +1712,7 @@ impl App {
                 self.ref_picker = None;
                 self.repo_search = None;
                 self.pending_search = None;
+                self.browser_query = None; // drop any in-view highlight (symmetry with `1`)
                 return;
             }
             // Toggle the tree/list panel to give the diff/content the full width.
@@ -1613,6 +1721,16 @@ impl App {
                 if !self.show_tree {
                     self.focus = Focus::Diff; // nothing to focus on a hidden tree
                 }
+                return;
+            }
+            // Repo-wide finder (both tabs): `f` by file name, `F` by content.
+            // `Tab` toggles the mode while it's open.
+            KeyCode::Char('f') => {
+                self.open_finder(SearchMode::Files);
+                return;
+            }
+            KeyCode::Char('F') => {
+                self.open_finder(SearchMode::Content);
                 return;
             }
             _ => {}
@@ -1624,10 +1742,6 @@ impl App {
         }
 
         // ---- Diff tab ----
-        // Search mode captures input while editing / navigating matches.
-        if self.search_key(key) {
-            return;
-        }
         // The compare picker, when open, captures all other keys.
         if self.picker_key(key) {
             return;
@@ -1635,12 +1749,7 @@ impl App {
         let half_page = (self.viewport.get() / 2).max(1);
 
         match key.code {
-            KeyCode::Char('/') => {
-                self.search = Some(Search {
-                    query: String::new(),
-                    editing: true,
-                })
-            }
+            KeyCode::Char('/') => self.open_search(),
             KeyCode::Char('e') => self.open_editor(),
             KeyCode::Char('c') => self.open_picker(),
             KeyCode::Char('b') => self.open_ref_picker(),
@@ -1734,11 +1843,8 @@ impl App {
     /// Key handling for the Files tab (repo browser + content viewer).
     fn handle_files_key(&mut self, key: KeyEvent, ctrl: bool) {
         match key.code {
-            KeyCode::Char('/') => self.open_repo_search(),
+            KeyCode::Char('/') => self.open_search(), // find in the open preview file
             KeyCode::Char('e') => self.open_editor(),
-            // Step through content-search matches in the preview (after a jump).
-            KeyCode::Char('n') if self.browser_query.is_some() => self.browser_search_jump(true),
-            KeyCode::Char('N') if self.browser_query.is_some() => self.browser_search_jump(false),
             // Visual selection in the preview: `v` start/clear, `y` copy (with a
             // `path:start-end` header) to the clipboard, Esc cancel.
             KeyCode::Char('v') if self.focus == Focus::Diff => {
