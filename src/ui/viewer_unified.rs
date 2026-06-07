@@ -46,10 +46,21 @@ pub(crate) fn fold_marker(hidden: usize, width: usize, is_cursor: bool) -> Line<
     Line::from(Span::styled(text, style))
 }
 
-fn num_cell(no: Option<u32>, width: usize) -> String {
+/// Right-aligned line-number cell (blank when there's no number on this side).
+pub(crate) fn num_cell(no: Option<u32>, width: usize) -> String {
     match no {
         Some(n) => format!("{n:>width$}"),
         None => " ".repeat(width),
+    }
+}
+
+/// The add/del background color for a line kind (None for context). Shared with
+/// the side-by-side viewer.
+pub(crate) fn base_bg(kind: LineKind, palette: &Palette) -> Option<Color> {
+    match kind {
+        LineKind::Add => Some(palette.add_bg),
+        LineKind::Del => Some(palette.del_bg),
+        LineKind::Context => None,
     }
 }
 
@@ -113,11 +124,12 @@ fn line_rows_wrapped(
     query: Option<&str>,
     is_cursor: bool,
 ) -> Vec<Line<'static>> {
-    let (sign, sign_color, base_bg) = match line.kind {
-        LineKind::Add => ('+', Color::Green, Some(palette.add_bg)),
-        LineKind::Del => ('-', Color::Red, Some(palette.del_bg)),
-        LineKind::Context => (' ', Color::DarkGray, None),
+    let (sign, sign_color) = match line.kind {
+        LineKind::Add => ('+', Color::Green),
+        LineKind::Del => ('-', Color::Red),
+        LineKind::Context => (' ', Color::DarkGray),
     };
+    let base_bg = base_bg(line.kind, palette);
     let prefix = prefix_width(w);
     let text_w = width.saturating_sub(prefix).max(1);
     let text_spans = compose::line_spans(
