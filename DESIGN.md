@@ -104,6 +104,9 @@ Mouse: wheel scroll + click to select a file.
   a `⚠ changed since reviewed` badge — never silently lose progress, never hide new changes.
 - **Empty state**: "No uncommitted changes. Press `c` to compare against a branch, or run
   with `--smart`."
+- **Position carries across tabs**: switching Diff ↔ Repo keeps you on the same file at
+  the same line (when it exists on the other side — a Repo file with no changes can't open
+  in the diff).
 - **Read-only**: gandr never writes to the working tree, index, or refs.
 
 ## 7. Theme — `theme = "auto"` (default)

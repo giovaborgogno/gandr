@@ -413,8 +413,9 @@ fn files_tab_browser() {
     fx.commit("init");
     fx.write("src/lib.rs", "pub fn run() {\n    let x = 2;\n}\n");
     let mut app = app_from(&fx);
-    app.handle_key(key('2')); // switch to Files tab
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // expand first dir (src)
+    // Switching to the Files tab carries the diff's current file: src/lib.rs is
+    // revealed (its dir expanded) and the cursor lands on it.
+    app.handle_key(key('2'));
     insta::assert_snapshot!(frame(&app, 90, 14));
 }
 
@@ -581,6 +582,40 @@ fn finder_opens_in_file_or_content_mode_and_tab_toggles() {
     assert_eq!(
         app.repo_search().map(|rs| rs.mode),
         Some(SearchMode::Content)
+    );
+}
+
+#[test]
+fn switching_tabs_carries_the_current_file_and_line() {
+    // Standing on a file in one tab and switching to the other keeps you on the
+    // same file at the same line.
+    let fx = Fixture::new();
+    fx.write("a.txt", "one\ntwo\nthree\nfour\nfive\n");
+    fx.commit("init");
+    fx.write("a.txt", "one\ntwo\nTHREE\nfour\nfive\n"); // change line 3
+    let mut app = app_from(&fx);
+    app.handle_key(key('l')); // enter the diff (focus it)
+    app.handle_key(key('j')); // move the diff cursor down to the changed region
+    app.handle_key(key('j'));
+    app.handle_key(key('2')); // → Repo: carries a.txt at the cursor's line
+    let loaded = app
+        .browser()
+        .loaded()
+        .expect("a file is open in the Repo tab");
+    assert!(
+        loaded.path.ends_with("a.txt"),
+        "the Repo preview shows the diff's current file"
+    );
+    assert!(
+        app.browser().content_cursor() >= 1,
+        "the preview is scrolled to the carried line, not the top (cursor {})",
+        app.browser().content_cursor()
+    );
+    app.handle_key(key('1')); // → Diff: still on a.txt
+    assert!(
+        app.current()
+            .is_some_and(|f| f.change.path.ends_with("a.txt")),
+        "the diff keeps the same file when switching back"
     );
 }
 
@@ -778,10 +813,10 @@ fn z_hides_the_tree_panel() {
 fn h_l_collapse_and_expand_dirs_in_files_tab() {
     let fx = Fixture::new();
     fx.write("src/lib.rs", "pub fn f() {}\n");
-    fx.commit("init");
     fx.write("a.txt", "x\n");
+    fx.commit("init"); // no uncommitted changes → no tab-sync; cursor starts on `src`
     let mut app = app_from(&fx);
-    app.handle_key(key('2')); // Files tab; cursor on first row (a dir, e.g. src)
+    app.handle_key(key('2')); // Files tab; cursor on first row (the `src` dir)
                               // `l` expands the dir under the cursor, `h` collapses it — same as →/←.
     app.handle_key(key('l'));
     let expanded = frame(&app, 90, 14);

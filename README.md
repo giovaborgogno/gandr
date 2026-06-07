@@ -67,6 +67,8 @@ stream into gandr (right): review the diff and search the whole repo without bre
 - Open-in-editor (`e` → `$VISUAL`/`$EDITOR` at the current line), help overlay (`?`).
 - **Select & copy** (`v` then `y`): grab lines from the diff (as a `path:start-end`
   + ```` ```diff ```` block) or from the Repo preview — ready to paste back to your agent.
+- **Position carries across tabs.** Switch between Diff and Repo and you stay on the same
+  file at the same line.
 - **Works without git too.** Open gandr in any folder; outside a repo it's a fast,
   read-only file browser (the Diff tab is just empty).
 

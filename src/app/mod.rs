@@ -20,7 +20,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// Which pane the directional keys act on. Navigation is *hybrid*: `Tab` switches
@@ -423,6 +423,39 @@ impl App {
     /// The active visual-selection range in the diff (display-row indices), if any.
     pub fn diff_selection(&self) -> Option<(usize, usize)> {
         self.diff_view.selection()
+    }
+
+    /// The 1-based new-file line under the diff cursor (old-file line for a pure
+    /// deletion) — used to carry the cursor position across tabs.
+    fn diff_cursor_line(&self) -> Option<u32> {
+        let rows = self.display_rows();
+        match rows.get(self.diff_view.cursor())? {
+            DiffRow::Line(idx) => self
+                .full_lines()
+                .get(*idx)
+                .and_then(|l| l.new_no.or(l.old_no)),
+            DiffRow::Fold { .. } => None,
+        }
+    }
+
+    /// Select changed file `rel` and put the diff cursor on the row showing the
+    /// new-file `line` (if it's visible). Returns whether `rel` is a changed file.
+    fn focus_diff_at(&mut self, rel: &Path, line: u32) -> bool {
+        let Some(idx) = self.files.iter().position(|f| f.change.path == rel) else {
+            return false;
+        };
+        self.select_file(idx);
+        let rows = self.display_rows();
+        let full = self.full_lines();
+        let pos = rows.iter().position(|r| match r {
+            DiffRow::Line(i) => full.get(*i).and_then(|l| l.new_no) == Some(line),
+            DiffRow::Fold { .. } => false,
+        });
+        if let Some(d) = pos {
+            self.diff_view.set_cursor(d);
+            self.anchor_cursor_near_top();
+        }
+        true
     }
 
     /// Copy the selected diff lines (`v` then `y`) as a `path:start-end` header
@@ -1895,6 +1928,14 @@ impl App {
                 return;
             }
             KeyCode::Char('1') => {
+                // Carry the Repo preview's file + line into the diff (if it's a
+                // changed file), so switching tabs keeps your place.
+                let target = self.browser.loaded().and_then(|l| {
+                    l.path
+                        .strip_prefix(&self.context.root)
+                        .ok()
+                        .map(|rel| (rel.to_path_buf(), self.browser.content_cursor() as u32 + 1))
+                });
                 self.tab = Tab::Diff;
                 self.picker = None;
                 self.search = None;
@@ -1902,9 +1943,17 @@ impl App {
                 self.quickfix = None;
                 self.pending_search = None;
                 self.browser_query = None;
+                if let Some((rel, line)) = target {
+                    self.focus_diff_at(&rel, line);
+                }
                 return;
             }
             KeyCode::Char('2') => {
+                // Carry the diff's current file + line into the Repo preview.
+                let target = self
+                    .current()
+                    .map(|f| f.change.path.clone())
+                    .zip(self.diff_cursor_line());
                 self.tab = Tab::Files;
                 self.picker = None;
                 self.search = None;
@@ -1913,6 +1962,10 @@ impl App {
                 self.quickfix = None;
                 self.pending_search = None;
                 self.browser_query = None; // drop any in-view highlight (symmetry with `1`)
+                if let Some((rel, line)) = target {
+                    let abs = self.context.root.join(rel);
+                    self.browser.reveal(&abs, Some(line as usize));
+                }
                 return;
             }
             // Toggle the tree/list panel to give the diff/content the full width.
