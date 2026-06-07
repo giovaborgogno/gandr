@@ -13,6 +13,9 @@ pub struct Viewport {
     /// First visible row; follows the cursor, updated at render time (hence the
     /// `Cell`, so `scroll()` can run from an `&self` render path).
     scroll: Cell<usize>,
+    /// Visual-selection anchor: `Some` while selecting (the selection spans the
+    /// rows between it and the cursor, inclusive). `None` when not selecting.
+    anchor: Option<usize>,
 }
 
 impl Viewport {
@@ -64,6 +67,33 @@ impl Viewport {
         } else {
             self.cursor.saturating_sub(n)
         };
+    }
+
+    // ---- visual selection ----
+
+    /// Start a selection at the cursor, or clear it if one is active (toggle).
+    pub fn toggle_selection(&mut self) {
+        self.anchor = match self.anchor {
+            Some(_) => None,
+            None => Some(self.cursor),
+        };
+    }
+
+    /// Cancel any active selection.
+    pub fn clear_selection(&mut self) {
+        self.anchor = None;
+    }
+
+    /// The inclusive `(lo, hi)` row range of the active selection, if any.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        self.anchor
+            .map(|a| (a.min(self.cursor), a.max(self.cursor)))
+    }
+
+    /// Whether `row` falls inside the active selection.
+    pub fn is_selected(&self, row: usize) -> bool {
+        self.selection()
+            .is_some_and(|(lo, hi)| row >= lo && row <= hi)
     }
 
     /// Move the cursor one row, wrapping at the ends like a wheel (tree/list).

@@ -249,6 +249,41 @@ impl Browser {
     pub fn content_cursor(&self) -> usize {
         self.content.cursor()
     }
+    /// Start/clear a visual selection in the preview (for copy).
+    pub fn content_toggle_selection(&mut self) {
+        self.content.toggle_selection();
+    }
+    pub fn content_clear_selection(&mut self) {
+        self.content.clear_selection();
+    }
+    /// The selected preview line range (inclusive), if a selection is active.
+    pub fn content_selection(&self) -> Option<(usize, usize)> {
+        self.content.selection()
+    }
+
+    /// Clipboard text for the selected preview lines: a `path:start-end` header
+    /// and the lines in a fenced block — ready to paste back to an agent.
+    pub fn copy_selection(&self, root: &Path) -> Option<String> {
+        let loaded = self.loaded.as_ref()?;
+        if loaded.binary || loaded.too_large {
+            return None;
+        }
+        let (lo, hi) = self.content.selection()?;
+        let hi = hi.min(loaded.lines.len().saturating_sub(1));
+        let body = loaded.lines.get(lo..=hi)?.join("\n");
+        let rel = loaded.path.strip_prefix(root).unwrap_or(&loaded.path);
+        let lang = loaded
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        Some(format!(
+            "{}:{}-{}\n```{lang}\n{body}\n```\n",
+            rel.display(),
+            lo + 1,
+            hi + 1,
+        ))
+    }
     /// Viewport top of the preview, keeping the cursor visible for `height` rows.
     pub fn content_scroll(&self, height: usize) -> usize {
         let total = self.loaded.as_ref().map(|l| l.lines.len()).unwrap_or(0);

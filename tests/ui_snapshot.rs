@@ -672,6 +672,27 @@ fn repo_tab_marks_changed_files() {
 }
 
 #[test]
+fn visual_select_copies_preview_lines_with_context() {
+    let fx = Fixture::new();
+    fx.write("note.txt", "alpha\nbeta\ngamma\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab; cursor on note.txt
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // enter content
+    app.handle_key(key('v')); // start selection at line 1
+    app.handle_key(key('j')); // extend to line 2
+    app.handle_key(key('y')); // copy
+    let text = app
+        .take_clipboard_request()
+        .expect("`y` should queue clipboard text");
+    assert!(text.contains("note.txt:1-2"), "header missing in:\n{text}");
+    assert!(
+        text.contains("alpha") && text.contains("beta") && !text.contains("gamma"),
+        "should copy only the selected lines:\n{text}"
+    );
+}
+
+#[test]
 fn arrows_enter_and_exit_a_file_in_files_tab() {
     use gandr::app::Focus;
     let fx = Fixture::new();

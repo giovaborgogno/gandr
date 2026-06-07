@@ -39,6 +39,7 @@ const KEYBAR_FILES: &[(&str, &str)] = &[
     ("Enter", "open"),
     ("h/l", "fold"),
     ("/", "search"),
+    ("v/y", "copy"),
     ("1", "diff"),
     ("?", "help"),
 ];
@@ -417,6 +418,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("Space", "mark reviewed"),
         ("c / b", "compare · branch/tag picker"),
         ("/", "find across all files (n / N)"),
+        ("v / y", "select lines / copy (Repo preview)"),
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),
         ("1 / 2", "Diff / Files tab"),

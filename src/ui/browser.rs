@@ -147,12 +147,17 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     let cursor = app.browser().content_cursor();
     let focused = app.focus() == Focus::Diff; // content pane focused
     let gutter_w = total.to_string().len().max(2);
+    let cw = content.width as usize;
     // Highlight content-search matches in the preview (after a repo content jump).
     let query = app.browser_query().filter(|q| !q.is_empty());
     let palette = crate::highlight::Palette::for_mode(app.theme_mode());
+    // Visual selection (v/y to copy) — selected rows get a selection background.
+    let selection = app.browser().content_selection();
+    let sel_bg = Color::Rgb(45, 55, 78);
 
     let mut lines: Vec<Line> = Vec::new();
     for (idx, text) in loaded.lines.iter().enumerate().skip(scroll).take(height) {
+        let selected = selection.is_some_and(|(lo, hi)| idx >= lo && idx <= hi);
         // The current line's number is reversed ("you are here").
         let gutter_style = if focused && idx == cursor {
             Style::default().add_modifier(Modifier::REVERSED)
@@ -177,7 +182,16 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             false,
             query,
         ));
-        lines.push(Line::from(spans));
+        if selected {
+            // Pad to the panel edge so the selection background spans the row.
+            let used = gutter_w + 1 + text.chars().count();
+            if used < cw {
+                spans.push(Span::raw(" ".repeat(cw - used)));
+            }
+            lines.push(Line::from(spans).style(Style::default().bg(sel_bg)));
+        } else {
+            lines.push(Line::from(spans));
+        }
     }
     f.render_widget(Paragraph::new(lines), content);
     super::render_scrollbar(f, inner, total, scroll);

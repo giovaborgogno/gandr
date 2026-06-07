@@ -7,6 +7,7 @@
 pub mod app;
 pub mod browser;
 pub mod cli;
+pub mod clipboard;
 pub mod config;
 pub mod diff;
 pub mod fuzzy;

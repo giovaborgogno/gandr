@@ -178,6 +178,8 @@ pub struct App {
     pending_search: Option<(u64, String, SearchMode)>,
     /// A pending "open in editor" request (path, 1-based line), taken by run_loop.
     editor_request: Option<(PathBuf, u32)>,
+    /// Pending clipboard text (copy a selection), emitted via OSC 52 by run_loop.
+    clipboard_request: Option<String>,
     should_quit: bool,
 }
 
@@ -291,6 +293,7 @@ impl App {
             search_epoch: 0,
             pending_search: None,
             editor_request: None,
+            clipboard_request: None,
             should_quit: false,
         };
         app.reset_view();
@@ -1004,6 +1007,10 @@ impl App {
     pub fn take_editor_request(&mut self) -> Option<(PathBuf, u32)> {
         self.editor_request.take()
     }
+    /// Take pending clipboard text (run_loop emits it via OSC 52), if any.
+    pub fn take_clipboard_request(&mut self) -> Option<String> {
+        self.clipboard_request.take()
+    }
 
     /// Queue opening the selected file in `$EDITOR`. In the Diff tab this is the
     /// selected change near its first hunk; in the Files tab it's the previewed
@@ -1683,6 +1690,18 @@ impl App {
             // Step through content-search matches in the preview (after a jump).
             KeyCode::Char('n') if self.browser_query.is_some() => self.browser_search_jump(true),
             KeyCode::Char('N') if self.browser_query.is_some() => self.browser_search_jump(false),
+            // Visual selection in the preview: `v` start/clear, `y` copy (with a
+            // `path:start-end` header) to the clipboard, Esc cancel.
+            KeyCode::Char('v') if self.focus == Focus::Diff => {
+                self.browser.content_toggle_selection()
+            }
+            KeyCode::Char('y') => {
+                if let Some(text) = self.browser.copy_selection(&self.context.root) {
+                    self.clipboard_request = Some(text);
+                    self.browser.content_clear_selection();
+                }
+            }
+            KeyCode::Esc => self.browser.content_clear_selection(),
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     Focus::Tree => Focus::Diff,
@@ -1862,6 +1881,15 @@ fn run_loop(
             // errors at shutdown; the loop normally exits via `should_quit`.
             // Detached worker/input threads are abandoned when main returns.
             Err(_) => break,
+        }
+
+        // Emit a queued clipboard copy via OSC 52 — an invisible escape that sets
+        // the terminal's clipboard (works locally and over SSH).
+        if let Some(text) = app.take_clipboard_request() {
+            use std::io::Write;
+            let mut out = std::io::stdout();
+            let _ = write!(out, "{}", crate::clipboard::osc52(&text));
+            let _ = out.flush();
         }
 
         // Honor a queued editor request: suspend the TUI + pause the input reader
