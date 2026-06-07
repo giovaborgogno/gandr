@@ -1,6 +1,6 @@
 [package]
 name = "gandr"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A read-only TUI to review code changes and browse your repo — delta-style diffs, GitHub-like side-by-side, built for reviewing AI coding-agent changes."
 authors = ["Giovanni Borgogno <giovaborgogno@gmail.com>"]

@@ -1,0 +1,149 @@
+name: Release
+
+# Tag a release to build binaries, publish a GitHub Release, refresh the
+# Homebrew formula (source sha256), and — when a token is configured — publish
+# to crates.io:
+#   cargo set-version 0.2.0  (or edit Cargo.toml) && git commit
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tooling (git2 vendors libgit2)
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build tooling (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          bin="target/${{ matrix.target }}/release/gandr"
+          strip "$bin" || true
+          tar -C "$(dirname "$bin")" -czf "gandr-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" gandr
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gandr-${{ matrix.target }}
+          path: gandr-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Source checksum + Homebrew formula
+        id: brew
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          mkdir -p out
+          cat > out/gandr.rb <<RB
+          # Drop this into your tap repo at Formula/gandr.rb.
+          class Gandr < Formula
+            desc "Read-only TUI to review code changes and browse your repo"
+            homepage "https://github.com/${GITHUB_REPOSITORY}"
+            url "${url}"
+            sha256 "${sha}"
+            license "MIT"
+            head "https://github.com/${GITHUB_REPOSITORY}.git", branch: "main"
+
+            depends_on "rust" => :build
+
+            def install
+              system "cargo", "install", *std_cargo_args
+            end
+
+            test do
+              assert_predicate bin/"gandr", :executable?
+            end
+          end
+          RB
+      - name: Create / update the release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            out/gandr.rb
+          body: |
+            Prebuilt binaries are attached. Install from source with `cargo install gandr`,
+            or via Homebrew once the tap is updated with the attached `gandr.rb`.
+
+            Homebrew source `sha256` for `${{ github.ref_name }}`:
+            ```
+            ${{ steps.brew.outputs.sha }}
+            ```
+
+  publish-crate:
+    name: cargo publish (crates.io)
+    # Only after the GitHub Release succeeds (binaries built), so a failed build
+    # can't leave an orphan crate version published with no matching release.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tooling
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Publish (no-op without a token or if the version already exists)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "CARGO_REGISTRY_TOKEN not set — skipping crates.io publish."
+            exit 0
+          fi
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if curl -fsS "https://crates.io/api/v1/crates/gandr/${version}" >/dev/null 2>&1; then
+            echo "gandr ${version} is already on crates.io — skipping (idempotent re-run)."
+            exit 0
+          fi
+          cargo publish
