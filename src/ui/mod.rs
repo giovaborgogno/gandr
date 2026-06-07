@@ -7,6 +7,7 @@ pub mod browser;
 pub mod tree;
 pub mod viewer_split;
 pub mod viewer_unified;
+pub mod viewport;
 
 use crate::app::{App, Focus, Tab};
 use crate::config::ViewMode;

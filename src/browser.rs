@@ -3,6 +3,7 @@
 //! selected file. State lives here; rendering is in `ui::browser`.
 
 use crate::highlight::{FgSpan, ThemeMode};
+use crate::ui::viewport::Viewport;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,9 @@ use std::rc::Rc;
 
 /// Don't read files larger than this into the content preview.
 const MAX_PREVIEW_BYTES: u64 = 2_000_000;
+
+/// Rows from the top to park the preview cursor after a search/reveal jump.
+const JUMP_MARGIN: usize = 3;
 
 /// Files up to this many lines get whole-file (multi-line aware) highlighting at
 /// load; longer files are highlighted per visible line at render time instead, so
@@ -48,13 +52,10 @@ pub struct Loaded {
 pub struct Browser {
     root: PathBuf,
     expanded: HashSet<PathBuf>,
-    cursor: usize,
-    tree_scroll: Cell<usize>,
-    /// Current line in the preview (j/k move it; the viewport follows and the
-    /// row is highlighted), mirroring the diff cursor.
-    content_cursor: usize,
-    /// Viewport top of the preview (follows the cursor); updated at render.
-    content_scroll: Cell<usize>,
+    /// Cursor + scroll over the tree's visible rows.
+    tree: Viewport,
+    /// Cursor + scroll over the preview's lines (the cursor row is highlighted).
+    content: Viewport,
     loaded: Option<Loaded>,
     /// Cache of visible rows (rebuilt only when the expanded set changes, not
     /// every frame — avoids walking disk on every render/keystroke). Handed out
@@ -91,10 +92,8 @@ impl Browser {
         let mut browser = Self {
             root,
             expanded: HashSet::new(),
-            cursor: 0,
-            tree_scroll: Cell::new(0),
-            content_cursor: 0,
-            content_scroll: Cell::new(0),
+            tree: Viewport::default(),
+            content: Viewport::default(),
             loaded: None,
             rows_cache: RefCell::new(Rc::new(Vec::new())),
             rows_dirty: Cell::new(true),
@@ -192,7 +191,7 @@ impl Browser {
     }
 
     pub fn cursor(&self) -> usize {
-        self.cursor
+        self.tree.cursor()
     }
 
     /// Line indices (0-based) in the loaded file containing `query` (smart-case:
@@ -223,19 +222,11 @@ impl Browser {
             .collect()
     }
 
-    /// Put the preview cursor on `line` (0-based) — e.g. a search match.
+    /// Put the preview cursor on `line` (0-based) — e.g. a search match — and
+    /// park it a few rows from the top.
     pub fn scroll_content_to(&mut self, line: usize) {
-        self.content_cursor = line.min(self.content_last_line());
-        self.anchor_content_near_top();
-    }
-
-    /// After a jump (search/reveal), pre-position the viewport so the target
-    /// sits a few rows from the top — not pinned to the bottom edge by the
-    /// follow logic in `content_scroll`. Mirrors the diff viewer.
-    fn anchor_content_near_top(&self) {
-        const MARGIN: usize = 3;
-        self.content_scroll
-            .set(self.content_cursor.saturating_sub(MARGIN));
+        self.content.set_cursor(line.min(self.content_last_line()));
+        self.content.anchor_near_top(JUMP_MARGIN);
     }
 
     /// Last valid preview line index.
@@ -248,14 +239,7 @@ impl Browser {
 
     /// First visible tree row so the cursor stays on-screen for `height` rows.
     pub fn tree_scroll(&self, height: usize) -> usize {
-        let mut s = self.tree_scroll.get();
-        if self.cursor < s {
-            s = self.cursor;
-        } else if height > 0 && self.cursor >= s + height {
-            s = self.cursor + 1 - height;
-        }
-        self.tree_scroll.set(s);
-        s
+        self.tree.scroll(height, None)
     }
 
     pub fn loaded(&self) -> Option<&Loaded> {
@@ -263,53 +247,28 @@ impl Browser {
     }
     /// The current preview line (for cursor highlighting + search position).
     pub fn content_cursor(&self) -> usize {
-        self.content_cursor
+        self.content.cursor()
     }
     /// Viewport top of the preview, keeping the cursor visible for `height` rows.
     pub fn content_scroll(&self, height: usize) -> usize {
         let total = self.loaded.as_ref().map(|l| l.lines.len()).unwrap_or(0);
-        let mut s = self.content_scroll.get();
-        if self.content_cursor < s {
-            s = self.content_cursor;
-        } else if height > 0 && self.content_cursor >= s + height {
-            s = self.content_cursor + 1 - height;
-        }
-        s = s.min(total.saturating_sub(height.max(1)));
-        self.content_scroll.set(s);
-        s
+        self.content.scroll(height, Some(total))
     }
     // ---- navigation ----
 
     pub fn cursor_down(&mut self) {
-        let len = self.rows_len();
-        if len == 0 {
-            return;
-        }
-        // Wrap to the top at the end (like a wheel).
-        self.cursor = if self.cursor + 1 >= len {
-            0
-        } else {
-            self.cursor + 1
-        };
+        self.tree.step_wrapping(true, self.rows_len());
         self.load_selection();
     }
 
     pub fn cursor_up(&mut self) {
-        let len = self.rows_len();
-        if len == 0 {
-            return;
-        }
-        self.cursor = if self.cursor == 0 {
-            len - 1
-        } else {
-            self.cursor - 1
-        };
+        self.tree.step_wrapping(false, self.rows_len());
         self.load_selection();
     }
 
     /// Enter/→: expand a directory, or (on a file) does nothing extra (already loaded).
     pub fn expand_or_open(&mut self) {
-        if let Some(row) = self.row_at(self.cursor) {
+        if let Some(row) = self.row_at(self.tree.cursor()) {
             if let EntryKind::Dir { .. } = row.kind {
                 self.expanded.insert(row.path);
                 self.invalidate();
@@ -320,14 +279,14 @@ impl Browser {
     /// Whether the cursor is on a directory row.
     pub fn cursor_is_dir(&self) -> bool {
         matches!(
-            self.row_at(self.cursor).map(|r| r.kind),
+            self.row_at(self.tree.cursor()).map(|r| r.kind),
             Some(EntryKind::Dir { .. })
         )
     }
 
     /// Enter on a directory: expand if collapsed, collapse if expanded.
     pub fn toggle(&mut self) {
-        if let Some(row) = self.row_at(self.cursor) {
+        if let Some(row) = self.row_at(self.tree.cursor()) {
             if let EntryKind::Dir { expanded } = row.kind {
                 if expanded {
                     self.expanded.remove(&row.path);
@@ -338,22 +297,22 @@ impl Browser {
             }
         }
         let len = self.rows_len();
-        if len > 0 && self.cursor >= len {
-            self.cursor = len - 1;
+        if len > 0 && self.tree.cursor() >= len {
+            self.tree.set_cursor(len - 1);
         }
     }
 
     /// ←: collapse the directory under the cursor.
     pub fn collapse(&mut self) {
-        if let Some(row) = self.row_at(self.cursor) {
+        if let Some(row) = self.row_at(self.tree.cursor()) {
             if let EntryKind::Dir { expanded: true, .. } = row.kind {
                 self.expanded.remove(&row.path);
                 self.invalidate();
             }
         }
         let len = self.rows_len();
-        if len > 0 && self.cursor >= len {
-            self.cursor = len - 1;
+        if len > 0 && self.tree.cursor() >= len {
+            self.tree.set_cursor(len - 1);
         }
     }
 
@@ -375,28 +334,30 @@ impl Browser {
         self.invalidate();
 
         if let Some(idx) = self.rows().iter().position(|r| r.path == path) {
-            self.cursor = idx;
+            self.tree.set_cursor(idx);
             self.load_selection();
             // `load_selection` resets the scroll; place the match near the top,
             // clamped to the file we actually loaded (only after a successful
             // load, so a missing row never scrolls the previously-shown file).
             if let Some(l) = line {
-                self.content_cursor = l.saturating_sub(1).min(self.content_last_line());
-                self.anchor_content_near_top();
+                self.content
+                    .set_cursor(l.saturating_sub(1).min(self.content_last_line()));
+                self.content.anchor_near_top(JUMP_MARGIN);
             }
         }
     }
 
     pub fn scroll_content_down(&mut self, n: usize) {
-        self.content_cursor = (self.content_cursor + n).min(self.content_last_line());
+        self.content.step_clamped(true, n, self.content_last_line());
     }
     pub fn scroll_content_up(&mut self, n: usize) {
-        self.content_cursor = self.content_cursor.saturating_sub(n);
+        self.content
+            .step_clamped(false, n, self.content_last_line());
     }
 
     /// Read the file under the cursor into the content cache (if it changed).
     fn load_selection(&mut self) {
-        let Some(row) = self.row_at(self.cursor) else {
+        let Some(row) = self.row_at(self.tree.cursor()) else {
             return;
         };
         if row.kind != EntryKind::File {
@@ -405,8 +366,7 @@ impl Browser {
         if self.loaded.as_ref().map(|l| &l.path) == Some(&row.path) {
             return;
         }
-        self.content_cursor = 0;
-        self.content_scroll.set(0);
+        self.content.reset();
 
         // Don't read huge files into memory for a preview.
         if std::fs::metadata(&row.path).map(|m| m.len()).unwrap_or(0) > MAX_PREVIEW_BYTES {

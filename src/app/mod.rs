@@ -14,6 +14,7 @@ use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::search::{SearchMode, SearchResults};
 use crate::ui;
 use crate::ui::tree::{self, Row, RowKind};
+use crate::ui::viewport::Viewport;
 use anyhow::{Context as _, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{DefaultTerminal, Frame};
@@ -93,15 +94,13 @@ pub struct App {
     selected: usize,
     /// Current line in the diff viewer (a display-row index); j/k move it and
     /// the viewport follows. The row under it is highlighted ("you are here").
-    diff_cursor: usize,
-    /// First visible diff row (follows the cursor); updated at render.
-    diff_scroll: Cell<usize>,
+    /// Cursor + scroll over the diff's display rows (the cursor row is the
+    /// "you are here" highlight; the viewport follows it).
+    diff_view: Viewport,
     /// Collapsed directory paths in the file tree (absent = expanded).
     collapsed: HashSet<PathBuf>,
-    /// Cursor over the tree's visible rows (dirs + files).
-    tree_cursor: usize,
-    /// First visible tree row (follows the cursor); updated at render.
-    tree_scroll: Cell<usize>,
+    /// Cursor + scroll over the file tree's visible rows (dirs + files).
+    tree_view: Viewport,
     /// Cached compacted tree rows, rebuilt only when `files`/`collapsed` change
     /// (not per keystroke). Handed out as a cheap `Rc` clone.
     tree_cache: RefCell<Rc<Vec<Row>>>,
@@ -254,11 +253,9 @@ impl App {
             error: None,
             files,
             selected: 0,
-            diff_cursor: 0,
-            diff_scroll: Cell::new(0),
+            diff_view: Viewport::default(),
             collapsed: HashSet::new(),
-            tree_cursor: 0,
-            tree_scroll: Cell::new(0),
+            tree_view: Viewport::default(),
             tree_cache: RefCell::new(Rc::new(Vec::new())),
             tree_dirty: Cell::new(true),
             repo_status: HashMap::new(),
@@ -324,23 +321,13 @@ impl App {
     }
     /// The current diff line (display-row index), for cursor highlighting.
     pub fn diff_cursor(&self) -> usize {
-        self.diff_cursor
+        self.diff_view.cursor()
     }
 
     /// Viewport top for the diff, keeping the cursor visible across `height`
-    /// rows (mirrors `tree_scroll`); recorded for page/bottom math.
+    /// rows and clamped so we never scroll past the last screenful.
     pub fn diff_scroll(&self, height: usize) -> usize {
-        let mut s = self.diff_scroll.get();
-        if self.diff_cursor < s {
-            s = self.diff_cursor;
-        } else if height > 0 && self.diff_cursor >= s + height {
-            s = self.diff_cursor + 1 - height;
-        }
-        // Clamp so we never scroll past the last screenful.
-        let max = self.total_rows().saturating_sub(height.max(1));
-        s = s.min(max);
-        self.diff_scroll.set(s);
-        s
+        self.diff_view.scroll(height, Some(self.total_rows()))
     }
     pub fn should_quit(&self) -> bool {
         self.should_quit
@@ -635,7 +622,7 @@ impl App {
         // if the cursor is past every fold, the nearest one above (the last).
         let (_, anchor) = folds
             .iter()
-            .find(|(row, _)| *row >= self.diff_cursor)
+            .find(|(row, _)| *row >= self.diff_view.cursor())
             .copied()
             .unwrap_or_else(|| folds[folds.len() - 1]);
 
@@ -697,19 +684,12 @@ impl App {
 
     /// The cursor row in the tree.
     pub fn tree_cursor(&self) -> usize {
-        self.tree_cursor
+        self.tree_view.cursor()
     }
 
     /// First visible tree row so the cursor stays on-screen for `height` rows.
     pub fn tree_scroll(&self, height: usize) -> usize {
-        let mut s = self.tree_scroll.get();
-        if self.tree_cursor < s {
-            s = self.tree_cursor;
-        } else if height > 0 && self.tree_cursor >= s + height {
-            s = self.tree_cursor + 1 - height;
-        }
-        self.tree_scroll.set(s);
-        s
+        self.tree_view.scroll(height, None)
     }
 
     // ---- diff-row geometry (over the folded display rows) ----
@@ -740,7 +720,7 @@ impl App {
     /// Point the viewer at the file under the tree cursor (if it's a file row).
     fn sync_selection(&mut self) {
         let rows = self.tree_rows();
-        if let Some(idx) = rows.get(self.tree_cursor).and_then(Row::file_index) {
+        if let Some(idx) = rows.get(self.tree_view.cursor()).and_then(Row::file_index) {
             if idx != self.selected {
                 self.selected = idx;
                 self.reset_diff_view();
@@ -750,35 +730,16 @@ impl App {
 
     /// Reset the diff cursor/scroll to the top (on selecting a different file).
     fn reset_diff_view(&mut self) {
-        self.diff_cursor = 0;
-        self.diff_scroll.set(0);
+        self.diff_view.reset();
     }
 
     fn cursor_down(&mut self) {
-        let len = self.tree_rows().len();
-        if len == 0 {
-            return;
-        }
-        // Wrap to the top at the end (like a wheel).
-        self.tree_cursor = if self.tree_cursor + 1 >= len {
-            0
-        } else {
-            self.tree_cursor + 1
-        };
+        self.tree_view.step_wrapping(true, self.tree_rows().len());
         self.sync_selection();
     }
 
     fn cursor_up(&mut self) {
-        let len = self.tree_rows().len();
-        if len == 0 {
-            return;
-        }
-        // Wrap to the bottom at the top.
-        self.tree_cursor = if self.tree_cursor == 0 {
-            len - 1
-        } else {
-            self.tree_cursor - 1
-        };
+        self.tree_view.step_wrapping(false, self.tree_rows().len());
         self.sync_selection();
     }
 
@@ -788,11 +749,11 @@ impl App {
         if let Some(pos) = rows
             .iter()
             .enumerate()
-            .skip(self.tree_cursor + 1)
+            .skip(self.tree_view.cursor() + 1)
             .find(|(_, r)| r.file_index().is_some())
             .map(|(i, _)| i)
         {
-            self.tree_cursor = pos;
+            self.tree_view.set_cursor(pos);
             self.sync_selection();
         }
     }
@@ -802,12 +763,12 @@ impl App {
         if let Some(pos) = rows
             .iter()
             .enumerate()
-            .take(self.tree_cursor)
+            .take(self.tree_view.cursor())
             .rev()
             .find(|(_, r)| r.file_index().is_some())
             .map(|(i, _)| i)
         {
-            self.tree_cursor = pos;
+            self.tree_view.set_cursor(pos);
             self.sync_selection();
         }
     }
@@ -818,7 +779,7 @@ impl App {
         if let Some(Row {
             kind: RowKind::Dir { path, expanded },
             ..
-        }) = rows.get(self.tree_cursor)
+        }) = rows.get(self.tree_view.cursor())
         {
             if collapse && *expanded {
                 self.collapsed.insert(path.clone());
@@ -835,7 +796,7 @@ impl App {
         if let Some(Row {
             kind: RowKind::Dir { path, expanded },
             ..
-        }) = rows.get(self.tree_cursor)
+        }) = rows.get(self.tree_view.cursor())
         {
             if *expanded {
                 self.collapsed.insert(path.clone());
@@ -849,8 +810,8 @@ impl App {
 
     fn clamp_cursor(&mut self) {
         let len = self.tree_rows().len();
-        if len > 0 && self.tree_cursor >= len {
-            self.tree_cursor = len - 1;
+        if len > 0 && self.tree_view.cursor() >= len {
+            self.tree_view.set_cursor(len - 1);
         }
     }
 
@@ -862,17 +823,15 @@ impl App {
     /// After a jump (hunk/search), put the cursor a few rows from the top so the
     /// target and the lines below it are visible (not pinned to the bottom edge).
     fn anchor_cursor_near_top(&self) {
-        const MARGIN: usize = 3;
-        self.diff_scroll
-            .set(self.diff_cursor.saturating_sub(MARGIN));
+        self.diff_view.anchor_near_top(3);
     }
 
     fn cursor_down_diff(&mut self, n: usize) {
-        self.diff_cursor = (self.diff_cursor + n).min(self.last_diff_row());
+        self.diff_view.step_clamped(true, n, self.last_diff_row());
     }
 
     fn cursor_up_diff(&mut self, n: usize) {
-        self.diff_cursor = self.diff_cursor.saturating_sub(n);
+        self.diff_view.step_clamped(false, n, self.last_diff_row());
     }
 
     /// Cycle how many context lines surround each hunk (expand, then wrap back to
@@ -889,12 +848,17 @@ impl App {
             .find(|&c| c > cur)
             .unwrap_or(LADDER[0]);
         // Re-clamp the cursor in case fewer rows are shown after re-folding.
-        self.diff_cursor = self.diff_cursor.min(self.last_diff_row());
+        let clamped = self.diff_view.cursor().min(self.last_diff_row());
+        self.diff_view.set_cursor(clamped);
     }
 
     fn next_hunk(&mut self) {
-        if let Some(&off) = self.hunk_offsets().iter().find(|&&o| o > self.diff_cursor) {
-            self.diff_cursor = off;
+        if let Some(&off) = self
+            .hunk_offsets()
+            .iter()
+            .find(|&&o| o > self.diff_view.cursor())
+        {
+            self.diff_view.set_cursor(off);
             self.anchor_cursor_near_top();
         }
     }
@@ -904,9 +868,9 @@ impl App {
             .hunk_offsets()
             .iter()
             .rev()
-            .find(|&&o| o < self.diff_cursor)
+            .find(|&&o| o < self.diff_view.cursor())
         {
-            self.diff_cursor = off;
+            self.diff_view.set_cursor(off);
             self.anchor_cursor_near_top();
         }
     }
@@ -916,16 +880,14 @@ impl App {
     /// Reset selection/cursor/scroll to the first file after the file set changes.
     fn reset_view(&mut self) {
         let rows = self.tree_rows();
-        self.tree_cursor = rows
+        let cursor = rows
             .iter()
             .position(|r| r.file_index().is_some())
             .unwrap_or(0);
-        self.selected = rows
-            .get(self.tree_cursor)
-            .and_then(Row::file_index)
-            .unwrap_or(0);
+        self.tree_view.set_cursor(cursor);
+        self.selected = rows.get(cursor).and_then(Row::file_index).unwrap_or(0);
         self.reset_diff_view();
-        self.tree_scroll.set(0);
+        self.tree_view.scroll_to_top();
     }
 
     /// Switch the comparison and recompute the diff asynchronously (the event
@@ -942,7 +904,7 @@ impl App {
     /// and scroll where possible.
     fn apply_files(&mut self, files: Vec<FileDiff>) {
         let prev_path = self.current().map(|f| f.change.path.clone());
-        let prev_cursor = self.diff_cursor;
+        let prev_cursor = self.diff_view.cursor();
         self.files = files;
         self.error = None;
         // The file set (and thus old/new text) changed: drop per-file caches so a
@@ -959,10 +921,11 @@ impl App {
                 .iter()
                 .position(|r| r.file_index() == Some(idx))
             {
-                self.tree_cursor = c;
+                self.tree_view.set_cursor(c);
             }
             // Keep the cursor where it was, clamped to the (possibly shorter) file.
-            self.diff_cursor = prev_cursor.min(self.last_diff_row());
+            self.diff_view
+                .set_cursor(prev_cursor.min(self.last_diff_row()));
         } else {
             self.reset_view();
         }
@@ -1101,7 +1064,7 @@ impl App {
             .iter()
             .position(|r| r.file_index() == Some(idx))
         {
-            self.tree_cursor = c;
+            self.tree_view.set_cursor(c);
         }
         self.reset_diff_view();
     }
@@ -1120,12 +1083,15 @@ impl App {
         // 1) Within the current file, the next match past the cursor.
         let here = self.search_matches();
         let in_here = if forward {
-            here.iter().find(|&&o| o > self.diff_cursor).copied()
+            here.iter().find(|&&o| o > self.diff_view.cursor()).copied()
         } else {
-            here.iter().rev().find(|&&o| o < self.diff_cursor).copied()
+            here.iter()
+                .rev()
+                .find(|&&o| o < self.diff_view.cursor())
+                .copied()
         };
         if let Some(off) = in_here {
-            self.diff_cursor = off.min(self.last_diff_row());
+            self.diff_view.set_cursor(off.min(self.last_diff_row()));
             self.anchor_cursor_near_top();
             return;
         }
@@ -1154,7 +1120,7 @@ impl App {
                 if idx != self.selected {
                     self.select_file(idx);
                 }
-                self.diff_cursor = off.min(self.last_diff_row());
+                self.diff_view.set_cursor(off.min(self.last_diff_row()));
                 self.anchor_cursor_near_top();
                 return;
             }
@@ -1168,7 +1134,7 @@ impl App {
         if matches.is_empty() {
             return None;
         }
-        let idx = matches.iter().position(|&o| o == self.diff_cursor)?;
+        let idx = matches.iter().position(|&o| o == self.diff_view.cursor())?;
         Some((idx + 1, matches.len()))
     }
 
@@ -1678,7 +1644,11 @@ impl App {
 
             // Tree expand/collapse; Enter on a file focuses the diff.
             KeyCode::Enter if self.focus == Focus::Tree => {
-                match self.tree_rows().get(self.tree_cursor).map(|r| &r.kind) {
+                match self
+                    .tree_rows()
+                    .get(self.tree_view.cursor())
+                    .map(|r| &r.kind)
+                {
                     Some(RowKind::Dir { .. }) => self.toggle_dir(),
                     Some(RowKind::File { .. }) => self.focus = Focus::Diff,
                     None => {}
@@ -1698,8 +1668,8 @@ impl App {
             KeyCode::Char(']') => self.next_hunk(),
             KeyCode::Char('[') => self.prev_hunk(),
 
-            KeyCode::Char('g') => self.diff_cursor = 0,
-            KeyCode::Char('G') => self.diff_cursor = self.last_diff_row(),
+            KeyCode::Char('g') => self.diff_view.set_cursor(0),
+            KeyCode::Char('G') => self.diff_view.set_cursor(self.last_diff_row()),
 
             _ => {}
         }
