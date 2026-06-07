@@ -102,6 +102,10 @@ pub struct App {
     tree_cursor: usize,
     /// First visible tree row (follows the cursor); updated at render.
     tree_scroll: Cell<usize>,
+    /// Cached compacted tree rows, rebuilt only when `files`/`collapsed` change
+    /// (not per keystroke). Handed out as a cheap `Rc` clone.
+    tree_cache: RefCell<Rc<Vec<Row>>>,
+    tree_dirty: Cell<bool>,
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
     /// Cached stateful syntax-highlight spans for the selected file's old/new
@@ -250,6 +254,8 @@ impl App {
             collapsed: HashSet::new(),
             tree_cursor: 0,
             tree_scroll: Cell::new(0),
+            tree_cache: RefCell::new(Rc::new(Vec::new())),
+            tree_dirty: Cell::new(true),
             viewport: Cell::new(0),
             diff_hl: RefCell::new(DiffHighlight::default()),
             hl_requested: None,
@@ -637,8 +643,20 @@ impl App {
     // ---- file tree ----
 
     /// The current visible tree rows (dirs + files, compacted + collapse-aware).
-    pub fn tree_rows(&self) -> Vec<Row> {
-        tree::build_rows(&self.files, &self.collapsed)
+    /// The compacted, collapse-aware tree rows (cached; rebuilt only when the
+    /// file set or the collapsed set changes). Returns a cheap `Rc` handle so
+    /// navigation/render never rebuild or clone the whole tree per keystroke.
+    pub fn tree_rows(&self) -> Rc<Vec<Row>> {
+        if self.tree_dirty.get() {
+            *self.tree_cache.borrow_mut() = Rc::new(tree::build_rows(&self.files, &self.collapsed));
+            self.tree_dirty.set(false);
+        }
+        Rc::clone(&self.tree_cache.borrow())
+    }
+
+    /// Mark the tree-row cache stale (call after `files`/`collapsed` change).
+    fn invalidate_tree(&self) {
+        self.tree_dirty.set(true);
     }
 
     /// The cursor row in the tree.
@@ -771,6 +789,7 @@ impl App {
             } else if !collapse && !*expanded {
                 self.collapsed.remove(path);
             }
+            self.invalidate_tree();
             self.clamp_cursor();
         }
     }
@@ -787,6 +806,7 @@ impl App {
             } else {
                 self.collapsed.remove(path);
             }
+            self.invalidate_tree();
             self.clamp_cursor();
         }
     }
@@ -878,6 +898,7 @@ impl App {
         self.spec = spec;
         self.title = title;
         self.collapsed.clear();
+        self.invalidate_tree();
         self.request_refresh();
     }
 
@@ -890,6 +911,7 @@ impl App {
         self.error = None;
         // The file set (and thus old/new text) changed: drop per-file caches so a
         // same-path working-tree edit doesn't reuse stale content/colors/folds.
+        self.invalidate_tree();
         self.invalidate_file_caches();
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))

@@ -6,6 +6,7 @@ use crate::highlight::{FgSpan, ThemeMode};
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Don't read files larger than this into the content preview.
 const MAX_PREVIEW_BYTES: u64 = 2_000_000;
@@ -56,8 +57,9 @@ pub struct Browser {
     content_scroll: Cell<usize>,
     loaded: Option<Loaded>,
     /// Cache of visible rows (rebuilt only when the expanded set changes, not
-    /// every frame — avoids walking disk on every render/keystroke).
-    rows_cache: RefCell<Vec<BrowserRow>>,
+    /// every frame — avoids walking disk on every render/keystroke). Handed out
+    /// as a cheap `Rc` clone so navigation never copies the whole tree.
+    rows_cache: RefCell<Rc<Vec<BrowserRow>>>,
     rows_dirty: Cell<bool>,
     /// Theme mode for syntax highlighting (resolved by the app at startup).
     mode: ThemeMode,
@@ -94,7 +96,7 @@ impl Browser {
             content_cursor: 0,
             content_scroll: Cell::new(0),
             loaded: None,
-            rows_cache: RefCell::new(Vec::new()),
+            rows_cache: RefCell::new(Rc::new(Vec::new())),
             rows_dirty: Cell::new(true),
             mode: ThemeMode::Dark,
         };
@@ -139,15 +141,26 @@ impl Browser {
         }
     }
 
-    /// Visible rows (cached; rebuilt from disk only when the expanded set changed).
-    pub fn rows(&self) -> Vec<BrowserRow> {
+    /// Visible rows (cached; rebuilt from disk only when the expanded set
+    /// changed). Returns a cheap `Rc` handle — no whole-tree clone per call.
+    pub fn rows(&self) -> Rc<Vec<BrowserRow>> {
         if self.rows_dirty.get() {
             let mut out = Vec::new();
             self.emit(&self.root, 0, &mut out);
-            *self.rows_cache.borrow_mut() = out;
+            *self.rows_cache.borrow_mut() = Rc::new(out);
             self.rows_dirty.set(false);
         }
-        self.rows_cache.borrow().clone()
+        Rc::clone(&self.rows_cache.borrow())
+    }
+
+    /// Number of visible rows (O(1) — never clones the tree).
+    pub fn rows_len(&self) -> usize {
+        self.rows().len()
+    }
+
+    /// One row by index — clones a single row, not the whole tree.
+    fn row_at(&self, idx: usize) -> Option<BrowserRow> {
+        self.rows().get(idx).cloned()
     }
 
     fn invalidate(&self) {
@@ -268,7 +281,7 @@ impl Browser {
     // ---- navigation ----
 
     pub fn cursor_down(&mut self) {
-        let len = self.rows().len();
+        let len = self.rows_len();
         if len == 0 {
             return;
         }
@@ -282,7 +295,7 @@ impl Browser {
     }
 
     pub fn cursor_up(&mut self) {
-        let len = self.rows().len();
+        let len = self.rows_len();
         if len == 0 {
             return;
         }
@@ -296,7 +309,7 @@ impl Browser {
 
     /// Enter/→: expand a directory, or (on a file) does nothing extra (already loaded).
     pub fn expand_or_open(&mut self) {
-        if let Some(row) = self.rows().into_iter().nth(self.cursor) {
+        if let Some(row) = self.row_at(self.cursor) {
             if let EntryKind::Dir { .. } = row.kind {
                 self.expanded.insert(row.path);
                 self.invalidate();
@@ -307,14 +320,14 @@ impl Browser {
     /// Whether the cursor is on a directory row.
     pub fn cursor_is_dir(&self) -> bool {
         matches!(
-            self.rows().into_iter().nth(self.cursor).map(|r| r.kind),
+            self.row_at(self.cursor).map(|r| r.kind),
             Some(EntryKind::Dir { .. })
         )
     }
 
     /// Enter on a directory: expand if collapsed, collapse if expanded.
     pub fn toggle(&mut self) {
-        if let Some(row) = self.rows().into_iter().nth(self.cursor) {
+        if let Some(row) = self.row_at(self.cursor) {
             if let EntryKind::Dir { expanded } = row.kind {
                 if expanded {
                     self.expanded.remove(&row.path);
@@ -324,7 +337,7 @@ impl Browser {
                 self.invalidate();
             }
         }
-        let len = self.rows().len();
+        let len = self.rows_len();
         if len > 0 && self.cursor >= len {
             self.cursor = len - 1;
         }
@@ -332,13 +345,13 @@ impl Browser {
 
     /// ←: collapse the directory under the cursor.
     pub fn collapse(&mut self) {
-        if let Some(row) = self.rows().into_iter().nth(self.cursor) {
+        if let Some(row) = self.row_at(self.cursor) {
             if let EntryKind::Dir { expanded: true, .. } = row.kind {
                 self.expanded.remove(&row.path);
                 self.invalidate();
             }
         }
-        let len = self.rows().len();
+        let len = self.rows_len();
         if len > 0 && self.cursor >= len {
             self.cursor = len - 1;
         }
@@ -383,7 +396,7 @@ impl Browser {
 
     /// Read the file under the cursor into the content cache (if it changed).
     fn load_selection(&mut self) {
-        let Some(row) = self.rows().into_iter().nth(self.cursor) else {
+        let Some(row) = self.row_at(self.cursor) else {
             return;
         };
         if row.kind != EntryKind::File {
