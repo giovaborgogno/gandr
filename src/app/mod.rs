@@ -6,7 +6,7 @@ pub mod watcher;
 use crate::browser::Browser;
 use crate::config::{Config, ViewMode};
 use crate::diff::fold::{self, DiffRow};
-use crate::diff::{engine, FileDiff, Line as DiffLine};
+use crate::diff::{engine, FileDiff, Line as DiffLine, LineKind};
 use crate::fuzzy;
 use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext, Status};
 use crate::highlight::{FgSpan, ThemeMode};
@@ -395,6 +395,49 @@ impl App {
     /// The currently selected file's diff, if any.
     pub fn current(&self) -> Option<&FileDiff> {
         self.files.get(self.selected)
+    }
+
+    /// The active visual-selection range in the diff (display-row indices), if any.
+    pub fn diff_selection(&self) -> Option<(usize, usize)> {
+        self.diff_view.selection()
+    }
+
+    /// Copy the selected diff lines (`v` then `y`) as a `path:start-end` header
+    /// plus a fenced ```diff block (with `+`/`-`/space signs), ready to paste back
+    /// to an agent. `None` when nothing is selected or the selection is empty.
+    fn copy_diff_selection(&self) -> Option<String> {
+        let (lo, hi) = self.diff_view.selection()?;
+        let file = self.current()?;
+        let rows = self.display_rows();
+        let full = self.full_lines();
+        let hi = hi.min(rows.len().saturating_sub(1));
+        let mut body = String::new();
+        let (mut first, mut last) = (None, None);
+        for row in rows.get(lo..=hi)? {
+            let DiffRow::Line(idx) = row else { continue }; // skip fold markers
+            let Some(line) = full.get(*idx) else { continue };
+            let sign = match line.kind {
+                LineKind::Add => '+',
+                LineKind::Del => '-',
+                LineKind::Context => ' ',
+            };
+            body.push(sign);
+            body.push_str(&line.text);
+            body.push('\n');
+            if let Some(n) = line.new_no.or(line.old_no) {
+                first.get_or_insert(n);
+                last = Some(n);
+            }
+        }
+        if body.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "{}:{}-{}\n```diff\n{body}```\n",
+            file.change.path.display(),
+            first.unwrap_or(0),
+            last.unwrap_or(0),
+        ))
     }
 
     /// Total additions / deletions across all files, for the header.
@@ -1763,6 +1806,16 @@ impl App {
             KeyCode::Char('w') => self.config.word_diff = !self.config.word_diff,
             KeyCode::Char('o') => self.cycle_context(),
             KeyCode::Char(' ') => self.toggle_review(),
+            // Visual selection in the diff: `v` start/clear, `y` copy the lines
+            // (with a `path:start-end` header), Esc cancel — mirrors the Repo tab.
+            KeyCode::Char('v') if self.focus == Focus::Diff => self.diff_view.toggle_selection(),
+            KeyCode::Char('y') => {
+                if let Some(text) = self.copy_diff_selection() {
+                    self.clipboard_request = Some(text);
+                    self.diff_view.clear_selection();
+                }
+            }
+            KeyCode::Esc => self.diff_view.clear_selection(),
             KeyCode::Char('r') => self.request_refresh(),
             KeyCode::Char('a') => self.auto_refresh = !self.auto_refresh,
 

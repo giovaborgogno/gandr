@@ -65,22 +65,27 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
         };
         let dir_touched = matches!(row.kind, EntryKind::Dir { .. }) && changed_dirs.contains(rel);
 
-        // Status gutter: a file's M/A/D/R marker, or a • on a touched directory.
-        let status = match (file_status, dir_touched) {
-            (Some(st), _) => Some((st.marker(), status_color(st))),
-            (None, true) => Some(('•', Color::DarkGray)),
-            _ => None,
-        };
+        // Files carry their M/A/D/R marker inline before the name. A directory
+        // that contains changes has its name tinted yellow (no marker column),
+        // so you can spot modified subtrees even while they're collapsed.
+        let marker = file_status.map(|st| (st.marker(), status_color(st)));
         let (arrow, label_color) = match &row.kind {
-            EntryKind::Dir { expanded } => (Some(*expanded), Some(Color::Blue)),
+            EntryKind::Dir { expanded } => {
+                let color = if dir_touched {
+                    Color::Yellow
+                } else {
+                    Color::Blue
+                };
+                (Some(*expanded), Some(color))
+            }
             EntryKind::File => (None, file_status.map(status_color)),
         };
         lines.push(super::tree_row_line(
             width,
             selected,
             row.depth,
-            None, // the Repo tab has no review state — keeps the gutter aligned
-            status,
+            None, // the Repo tab has no review state — no review column
+            marker,
             arrow,
             &row.name,
             label_color,
@@ -131,7 +136,7 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     let palette = crate::highlight::Palette::for_mode(app.theme_mode());
     // Visual selection (v/y to copy) — selected rows get a selection background.
     let selection = app.browser().content_selection();
-    let sel_bg = Color::Rgb(45, 55, 78);
+    let sel_bg = super::viewer_unified::SELECTION_BG;
 
     // Long lines wrap within the content column (matching the diff viewer)
     // rather than truncating. Scrolling is per logical line: each line starts a

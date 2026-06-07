@@ -6,7 +6,7 @@ expression: "styled_frame(&app, 60, 10)"
  Diff [1]   Repo [2]                 main · uncommitted · ◉ 
 ────────────────────────────────────────────────────────────
 ┌ Changes  +1 −1  0/1 ───────────┐┌────────────────────────┐
-│ M   a.txt                      ││a.txt  +1 −1  [1/1]     │
+│  M a.txt                       ││a.txt  +1 −1  [1/1]     │
 │                                ││ 1    - the quick brown │
 │                                ││         fox            │
 │                                ││    1 + the quick red f │

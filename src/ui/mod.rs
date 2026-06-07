@@ -95,30 +95,31 @@ fn border_style(focused: bool) -> Style {
 }
 
 /// One row of a file tree, shared by the Diff tree and the Repo browser so both
-/// tabs lay out identically. Columns, left to right:
+/// tabs use one compact layout. The status marker sits **inline, right before
+/// the name** and indents with the tree (directories sit flush-left):
 ///
 /// ```text
-/// [review][status] [indent][▾/▸ |   ]name
-///    0       1     2  …
+/// ▾ src/app/        (dir: indent + arrow + name)
+///     M mod.rs      (Diff file: indent + review + marker + name)
+///   M README.md
+///   M lib.rs        (Repo file: indent + marker + name — no review column)
 /// ```
 ///
-/// * `review` — `✓`/`⚠` (Diff review state); `None` renders a blank column so
-///   the status marker still lines up in the Repo tab, which has no review.
-/// * `status` — the `M`/`A`/`D`/`R` change marker (or `•` for a touched dir);
-///   `None` renders blank. This column is at the **same x in both tabs**.
-/// * `arrow` — `Some(expanded)` for a directory (gets `▾ `/`▸ ` + a trailing
-///   `/`), `None` for a file (gets two leading spaces so names align under the
-///   arrow).
-/// * `label_color` — colors the arrow+name (e.g. blue dirs, status-colored
-///   changed files); dropped on the selected row so the reversed highlight
-///   stays uniform.
+/// * `review` — the Diff review cell (`✓`/`⚠`/blank); `None` omits the column
+///   entirely (the Repo tab has no review state).
+/// * `marker` — the `M`/`A`/`D`/`R` change marker for a file; `None` renders two
+///   blank columns so file names still line up.
+/// * `arrow` — `Some(expanded)` for a directory (`▾ `/`▸ ` + trailing `/`),
+///   `None` for a file (gets the review/marker gutter instead).
+/// * `label_color` — colors the arrow+name; dropped on the selected row so the
+///   reversed highlight stays uniform.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_row_line(
     width: usize,
     selected: bool,
     depth: usize,
     review: Option<(char, Color)>,
-    status: Option<(char, Color)>,
+    marker: Option<(char, Color)>,
     arrow: Option<bool>,
     label: &str,
     label_color: Option<Color>,
@@ -130,35 +131,41 @@ pub(crate) fn tree_row_line(
     };
     // On the selected row we drop fg colors: a colored fg would invert into a
     // colored background block under REVERSED.
-    let gutter = |cell: Option<(char, Color)>| {
-        let (ch, color) = cell.unwrap_or((' ', Color::Reset));
-        let style = if selected || cell.is_none() {
+    let colored = |c: Color| {
+        if selected {
             row_style
         } else {
-            row_style.fg(color)
-        };
-        Span::styled(ch.to_string(), style)
-    };
-
-    let indent = "  ".repeat(depth);
-    let body = match arrow {
-        Some(expanded) => format!("{} {label}/", if expanded { '▾' } else { '▸' }),
-        None => format!("  {label}"),
+            row_style.fg(c)
+        }
     };
     let body_style = match (selected, label_color) {
         (true, _) | (false, None) => row_style,
         (false, Some(c)) => row_style.fg(c),
     };
 
-    let mut spans = vec![
-        gutter(review),
-        gutter(status),
-        Span::styled(" ", row_style),
-        Span::styled(indent.clone(), row_style),
-        Span::styled(body.clone(), body_style),
-    ];
+    let mut spans = vec![Span::styled("  ".repeat(depth), row_style)];
+    match arrow {
+        Some(expanded) => {
+            // Directory: just the arrow + name, flush against the indent.
+            spans.push(Span::styled(
+                format!("{} {label}/", if expanded { '▾' } else { '▸' }),
+                body_style,
+            ));
+        }
+        None => {
+            // File: optional review cell, then the 2-wide marker, then the name.
+            if let Some((glyph, color)) = review {
+                spans.push(Span::styled(format!("{glyph} "), colored(color)));
+            }
+            match marker {
+                Some((ch, color)) => spans.push(Span::styled(format!("{ch} "), colored(color))),
+                None => spans.push(Span::styled("  ".to_string(), row_style)),
+            }
+            spans.push(Span::styled(label.to_string(), body_style));
+        }
+    }
     // Pad to the panel width so the selected row's highlight spans the panel.
-    let used = 3 + indent.chars().count() + body.chars().count();
+    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     if used < width {
         spans.push(Span::styled(" ".repeat(width - used), row_style));
     }
@@ -491,7 +498,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("c / b", "compare · branch/tag picker"),
         ("/", "find in view: diff / open file (n / N)"),
         ("f / F", "find repo: file name / contents"),
-        ("v / y", "select lines / copy (Repo preview)"),
+        ("v / y", "select lines / copy (diff & preview)"),
         ("e", "open in $EDITOR"),
         ("r / a", "refresh · auto-refresh"),
         ("1 / 2", "Diff / Files tab"),
@@ -725,8 +732,19 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     let focused = app.focus() == Focus::Diff;
     match app.view() {
         ViewMode::Unified => viewer_unified::render(
-            f, diff_body, &full, &display, scroll, cursor, focused, old_hl, new_hl, &palette,
-            word_on, query,
+            f,
+            diff_body,
+            &full,
+            &display,
+            scroll,
+            cursor,
+            focused,
+            old_hl,
+            new_hl,
+            &palette,
+            word_on,
+            query,
+            app.diff_selection(),
         ),
         ViewMode::SideBySide => viewer_split::render(
             f, diff_body, &full, &display, scroll, old_hl, new_hl, &palette, word_on, query,

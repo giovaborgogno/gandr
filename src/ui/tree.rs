@@ -131,12 +131,13 @@ fn status_cell(files: &[FileDiff], index: usize) -> (char, Color) {
     (marker, color)
 }
 
-/// Review marker cell (✓ reviewed, ⚠ changed-since, blank otherwise).
-fn review_cell(status: ReviewStatus) -> Option<(char, Color)> {
+/// Review cell (✓ reviewed, ⚠ changed-since, blank otherwise). Always present in
+/// the Diff tree so reviewed and unreviewed file names line up.
+fn review_cell(status: ReviewStatus) -> (char, Color) {
     match status {
-        ReviewStatus::Reviewed => Some(('✓', Color::Green)),
-        ReviewStatus::ChangedSinceReviewed => Some(('⚠', Color::Yellow)),
-        ReviewStatus::Unreviewed => None,
+        ReviewStatus::Reviewed => ('✓', Color::Green),
+        ReviewStatus::ChangedSinceReviewed => ('⚠', Color::Yellow),
+        ReviewStatus::Unreviewed => (' ', Color::Reset),
     }
 }
 
@@ -185,7 +186,7 @@ pub fn render(
                     width,
                     selected,
                     row.depth,
-                    review,
+                    Some(review),
                     Some((marker, color)),
                     None,
                     &row.label,

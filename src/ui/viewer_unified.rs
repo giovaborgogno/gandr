@@ -14,6 +14,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+/// Background for a visual selection (v/y), shared with the Repo preview.
+pub(crate) const SELECTION_BG: Color = Color::Rgb(45, 55, 78);
+
 /// Compute the gutter width (digits) from the largest line number in the file.
 pub(crate) fn gutter_width(full: &[DiffLine]) -> usize {
     full.iter()
@@ -123,13 +126,20 @@ fn line_rows_wrapped(
     word_on: bool,
     query: Option<&str>,
     is_cursor: bool,
+    selected: bool,
 ) -> Vec<Line<'static>> {
     let (sign, sign_color) = match line.kind {
         LineKind::Add => ('+', Color::Green),
         LineKind::Del => ('-', Color::Red),
         LineKind::Context => (' ', Color::DarkGray),
     };
-    let base_bg = base_bg(line.kind, palette);
+    // A visual selection (v/y) overrides the add/del background so the selected
+    // run reads as one block; the +/- sign colors still mark each line's kind.
+    let base_bg = if selected {
+        Some(SELECTION_BG)
+    } else {
+        base_bg(line.kind, palette)
+    };
     let prefix = prefix_width(w);
     let text_w = width.saturating_sub(prefix).max(1);
     let text_spans = compose::line_spans(
@@ -207,6 +217,7 @@ fn display_row_lines(
     word_on: bool,
     query: Option<&str>,
     is_cursor: bool,
+    selected: bool,
 ) -> Vec<Line<'static>> {
     match row {
         DiffRow::Fold { hidden, .. } => vec![fold_marker(*hidden, width, is_cursor)],
@@ -215,7 +226,9 @@ fn display_row_lines(
         DiffRow::Line(idx) => match full.get(*idx) {
             Some(line) => {
                 let fg = line_fg(line, old_hl, new_hl);
-                line_rows_wrapped(line, w, width, fg, palette, word_on, query, is_cursor)
+                line_rows_wrapped(
+                    line, w, width, fg, palette, word_on, query, is_cursor, selected,
+                )
             }
             None => vec![Line::from("")],
         },
@@ -240,7 +253,7 @@ pub fn rows(
         .iter()
         .flat_map(|row| {
             display_row_lines(
-                row, full, w, width, old_hl, new_hl, palette, word_on, query, false,
+                row, full, w, width, old_hl, new_hl, palette, word_on, query, false, false,
             )
         })
         .collect()
@@ -263,6 +276,7 @@ pub fn render(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    selection: Option<(usize, usize)>,
 ) {
     // Reserve the rightmost column for the scrollbar.
     let content = Rect {
@@ -295,6 +309,7 @@ pub fn render(
     let mut di = top;
     while di < total && term_rows.len() < height {
         let is_cursor = focused && di == cursor;
+        let selected = selection.is_some_and(|(lo, hi)| di >= lo && di <= hi);
         for row in display_row_lines(
             &display[di],
             full,
@@ -306,6 +321,7 @@ pub fn render(
             word_on,
             query,
             is_cursor,
+            selected,
         ) {
             if term_rows.len() < height {
                 term_rows.push(row);

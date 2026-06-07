@@ -1,12 +1,12 @@
 ---
 source: tests/ui_snapshot.rs
-assertion_line: 959
+assertion_line: 1087
 expression: "frame(&app, 70, 14)"
 ---
 " Diff [1]   Repo [2]                           main · uncommitted · ◉ "
 "──────────────────────────────────────────────────────────────────────"
 "┌ Changes  +1 −1  0/1 ───────────┐┌──────────────────────────────────┐"
-"│ M   a.txt                      ││a.txt  +1 −1  [1/1]               │"
+"│  M a.txt                       ││a.txt  +1 −1  [1/1]               │"
 "│              ┌Compare against…──────────────────────┐              │"
 "│              │ Uncommitted (vs HEAD)                │              │"
 "│              │ Staged (index vs HEAD)               │              │"

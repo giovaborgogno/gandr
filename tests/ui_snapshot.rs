@@ -708,6 +708,38 @@ fn h_l_collapse_and_expand_dirs_in_files_tab() {
 }
 
 #[test]
+fn visual_select_copies_diff_lines_with_context() {
+    // `v` then `y` in the Diff viewer copies the selected diff lines as a
+    // `path:start-end` header + a ```diff block, like the Repo preview does.
+    let fx = Fixture::new();
+    fx.write("a.txt", "one\ntwo\nthree\n");
+    fx.commit("init");
+    fx.write("a.txt", "one\nTWO\nthree\n"); // modify line 2
+    let mut app = app_from(&fx);
+    app.handle_key(key('l')); // enter the file's diff (focus the diff pane)
+    app.handle_key(key('v')); // start the selection at the cursor
+    app.handle_key(key('j')); // extend down one row
+    let mid = frame(&app, 80, 16); // render with the selection active (no panic)
+    assert!(
+        mid.contains("TWO"),
+        "the diff still renders mid-selection:\n{mid}"
+    );
+    app.handle_key(key('y')); // copy
+    let text = app
+        .take_clipboard_request()
+        .expect("`y` should queue clipboard text");
+    assert!(
+        text.contains("a.txt:"),
+        "missing path:range header:\n{text}"
+    );
+    assert!(text.contains("```diff"), "missing diff fence:\n{text}");
+    assert!(
+        text.contains("+TWO") || text.contains("-two"),
+        "should include the changed lines with +/- signs:\n{text}"
+    );
+}
+
+#[test]
 fn repo_tab_marks_changed_files() {
     let fx = Fixture::new();
     fx.write("a.txt", "one\n");
@@ -717,13 +749,14 @@ fn repo_tab_marks_changed_files() {
     let mut app = app_from(&fx);
     app.handle_key(key('2')); // Files tab
     let out = frame(&app, 60, 14);
-    // the tree rows carry a colored M (modified) / A (added) marker in the gutter
+    // the tree rows carry a colored M (modified) / A (added) marker inline
+    // before the file name.
     assert!(
-        out.contains("M   a.txt"),
+        out.contains("M a.txt"),
         "a.txt should show an M marker in the tree:\n{out}"
     );
     assert!(
-        out.contains("A   b.txt"),
+        out.contains("A b.txt"),
         "b.txt should show an A marker in the tree:\n{out}"
     );
 }
