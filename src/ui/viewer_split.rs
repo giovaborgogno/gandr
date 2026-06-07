@@ -7,12 +7,15 @@
 use crate::diff::fold::DiffRow;
 use crate::diff::{Line as DiffLine, LineKind};
 use crate::highlight::{compose, FgSpan, Palette};
-use crate::ui::viewer_unified::{base_bg, fold_marker, gutter_width, line_fg, num_cell};
+use crate::ui::viewer_unified::{
+    base_bg, fold_marker, gutter_width, line_fg, num_cell, SELECTION_BG,
+};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use std::collections::HashSet;
 
 /// Wrap styled spans to `width` display columns (char-count approximation),
 /// preserving each span's style. Shared with the unified viewer.
@@ -58,10 +61,18 @@ fn cell_rows(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    is_cursor: bool,
+    selected: bool,
 ) -> Vec<Vec<Span<'static>>> {
     let text_w = side_w.saturating_sub(gutter_w + 1).max(1);
     let Some(line) = line else {
-        return vec![vec![Span::raw(" ".repeat(side_w))]];
+        // A blank (unpaired) cell still shows the selection background.
+        let style = if selected {
+            Style::default().bg(SELECTION_BG)
+        } else {
+            Style::default()
+        };
+        return vec![vec![Span::styled(" ".repeat(side_w), style)]];
     };
 
     let fg = line_fg(line, old_hl, new_hl);
@@ -89,10 +100,12 @@ fn cell_rows(
         } else {
             " ".repeat(gutter_w)
         };
-        let mut row = vec![Span::styled(
-            format!("{gutter} "),
-            Style::default().fg(Color::DarkGray),
-        )];
+        // The line-number gutter reverses on the cursor row ("you are here").
+        let mut gutter_style = Style::default().fg(Color::DarkGray);
+        if is_cursor && k == 0 {
+            gutter_style = gutter_style.add_modifier(Modifier::REVERSED);
+        }
+        let mut row = vec![Span::styled(format!("{gutter} "), gutter_style)];
         row.extend(spans.iter().cloned());
 
         // Pad the text area to side_w with the base background.
@@ -109,6 +122,14 @@ fn cell_rows(
                 style = style.bg(bg);
             }
             row.push(Span::styled(pad, style));
+        }
+        // A selected cell paints its whole row (code included), like the unified
+        // viewer — stamped over the composed per-span backgrounds.
+        if selected {
+            row = row
+                .into_iter()
+                .map(|s| Span::styled(s.content, s.style.bg(SELECTION_BG)))
+                .collect();
         }
         rows.push(row);
     }
@@ -200,7 +221,9 @@ fn row_height(lr: &LogicalRow, text_w: usize) -> usize {
     }
 }
 
-/// Build the terminal `Line`s for one paired row (old `│` new).
+/// Build the terminal `Line`s for one paired row (old `│` new). `cursor`/`sel`
+/// hold the cursor line and the selected-line set (by pointer into `full`), so a
+/// cell highlights when its line is the cursor or inside the visual selection.
 #[allow(clippy::too_many_arguments)]
 fn build_pair(
     left: Option<&DiffLine>,
@@ -212,20 +235,55 @@ fn build_pair(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    cursor: Option<*const DiffLine>,
+    sel: &HashSet<*const DiffLine>,
 ) -> Vec<Line<'static>> {
+    let is_cursor = |c: Option<&DiffLine>| c.is_some_and(|l| cursor == Some(l as *const DiffLine));
+    let is_sel = |c: Option<&DiffLine>| c.is_some_and(|l| sel.contains(&(l as *const DiffLine)));
+    let (l_sel, r_sel) = (is_sel(left), is_sel(right));
     let left_rows = cell_rows(
-        left, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+        left,
+        side_w,
+        gutter_w,
+        old_hl,
+        new_hl,
+        palette,
+        word_on,
+        query,
+        is_cursor(left),
+        l_sel,
     );
     let right_rows = cell_rows(
-        right, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+        right,
+        side_w,
+        gutter_w,
+        old_hl,
+        new_hl,
+        palette,
+        word_on,
+        query,
+        is_cursor(right),
+        r_sel,
     );
     let height = left_rows.len().max(right_rows.len());
-    let blank = || vec![Span::raw(" ".repeat(side_w))];
+    let blank = |sel: bool| {
+        let style = if sel {
+            Style::default().bg(SELECTION_BG)
+        } else {
+            Style::default()
+        };
+        vec![Span::styled(" ".repeat(side_w), style)]
+    };
+    let sep_style = if l_sel || r_sel {
+        Style::default().fg(Color::DarkGray).bg(SELECTION_BG)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let mut out = Vec::with_capacity(height);
     for k in 0..height {
-        let mut spans = left_rows.get(k).cloned().unwrap_or_else(blank);
-        spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
-        spans.extend(right_rows.get(k).cloned().unwrap_or_else(blank));
+        let mut spans = left_rows.get(k).cloned().unwrap_or_else(|| blank(l_sel));
+        spans.push(Span::styled("│", sep_style));
+        spans.extend(right_rows.get(k).cloned().unwrap_or_else(|| blank(r_sel)));
         out.push(Line::from(spans));
     }
     out
@@ -242,11 +300,13 @@ fn build_logical(
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    cursor: Option<*const DiffLine>,
+    sel: &HashSet<*const DiffLine>,
 ) -> Vec<Line<'static>> {
     match lr {
         LogicalRow::Fold(hidden) => vec![fold_marker(*hidden, width, false)],
         LogicalRow::Pair(l, r) => build_pair(
-            *l, *r, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+            *l, *r, side_w, gutter_w, old_hl, new_hl, palette, word_on, query, cursor, sel,
         ),
     }
 }
@@ -266,14 +326,29 @@ pub fn rows(
 ) -> Vec<Line<'static>> {
     let gutter_w = gutter_width(full);
     let side_w = width.saturating_sub(1) / 2;
+    let sel = HashSet::new();
     logical_rows(full, display)
         .iter()
         .flat_map(|lr| {
             build_logical(
-                lr, width, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+                lr, width, side_w, gutter_w, old_hl, new_hl, palette, word_on, query, None, &sel,
             )
         })
         .collect()
+}
+
+/// The set of line pointers selected/under-cursor, from display-row indices into
+/// `full` — so `build_pair` can match a cell's line by identity.
+fn line_ptrs(
+    full: &[DiffLine],
+    display: &[DiffRow],
+    rows: impl Iterator<Item = usize>,
+) -> Vec<*const DiffLine> {
+    rows.filter_map(|d| match display.get(d) {
+        Some(DiffRow::Line(idx)) => full.get(*idx).map(|l| l as *const DiffLine),
+        _ => None,
+    })
+    .collect()
 }
 
 /// Render the side-by-side diff into `area`, scrolled to `scroll`. Counts total
@@ -286,11 +361,14 @@ pub fn render(
     full: &[DiffLine],
     display: &[DiffRow],
     scroll: usize,
+    cursor: usize,
+    focused: bool,
     old_hl: &[Vec<FgSpan>],
     new_hl: &[Vec<FgSpan>],
     palette: &Palette,
     word_on: bool,
     query: Option<&str>,
+    selection: Option<(usize, usize)>,
 ) {
     let content = Rect {
         width: area.width.saturating_sub(1),
@@ -301,6 +379,19 @@ pub fn render(
     let side_w = width.saturating_sub(1) / 2;
     let text_w = side_w.saturating_sub(gutter_w + 1).max(1);
     let height = area.height as usize;
+
+    // The cursor line (when focused) and the selected lines, matched by identity
+    // in `build_pair` — the diff cursor/selection live in display-row space.
+    let cursor_line = focused
+        .then(|| match display.get(cursor) {
+            Some(DiffRow::Line(idx)) => full.get(*idx).map(|l| l as *const DiffLine),
+            _ => None,
+        })
+        .flatten();
+    let sel: HashSet<*const DiffLine> = match selection {
+        Some((lo, hi)) => line_ptrs(full, display, lo..=hi).into_iter().collect(),
+        None => HashSet::new(),
+    };
 
     let logical = logical_rows(full, display);
     let total: usize = logical.iter().map(|lr| row_height(lr, text_w)).sum();
@@ -316,7 +407,17 @@ pub fn render(
         let h = row_height(lr, text_w);
         if term + h > effective {
             for (k, line) in build_logical(
-                lr, width, side_w, gutter_w, old_hl, new_hl, palette, word_on, query,
+                lr,
+                width,
+                side_w,
+                gutter_w,
+                old_hl,
+                new_hl,
+                palette,
+                word_on,
+                query,
+                cursor_line,
+                &sel,
             )
             .into_iter()
             .enumerate()

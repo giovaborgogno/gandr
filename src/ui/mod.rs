@@ -766,7 +766,19 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
             app.diff_selection(),
         ),
         ViewMode::SideBySide => viewer_split::render(
-            f, diff_body, &full, &display, scroll, old_hl, new_hl, &palette, word_on, query,
+            f,
+            diff_body,
+            &full,
+            &display,
+            scroll,
+            cursor,
+            focused,
+            old_hl,
+            new_hl,
+            &palette,
+            word_on,
+            query,
+            app.diff_selection(),
         ),
     }
 }

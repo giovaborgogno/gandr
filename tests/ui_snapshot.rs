@@ -585,6 +585,26 @@ fn finder_opens_in_file_or_content_mode_and_tab_toggles() {
 }
 
 #[test]
+fn split_view_paints_the_visual_selection() {
+    // The side-by-side viewer now honors the visual selection (and the cursor):
+    // a selected row's cells paint the selection background across their width.
+    let fx = Fixture::new();
+    fx.write("a.txt", "one\ntwo\nthree\nfour\n");
+    fx.commit("init");
+    fx.write("a.txt", "one\nTWO\nthree\nFOUR\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('l')); // focus the diff
+    app.handle_key(key('s')); // side-by-side view
+    app.handle_key(key('v')); // start selection
+    app.handle_key(key('j')); // extend down
+    let styled = styled_frame(&app, 80, 16);
+    assert!(
+        styled.lines().any(|l| l.matches('s').count() >= 5),
+        "the selection bg should paint across the side-by-side row:\n{styled}"
+    );
+}
+
+#[test]
 fn content_finder_quickfix_walks_matches_across_files() {
     // `F` (repo content) opens a quickfix list; after jumping, n/N step every
     // match across the whole repo, crossing files (nvim :cnext model).
