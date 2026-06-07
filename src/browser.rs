@@ -301,6 +301,26 @@ impl Browser {
         self.load_selection();
     }
 
+    /// g/G: jump the tree cursor to the first/last row (and load it).
+    pub fn cursor_to_top(&mut self) {
+        self.tree.set_cursor(0);
+        self.load_selection();
+    }
+
+    pub fn cursor_to_bottom(&mut self) {
+        self.tree.set_cursor(self.rows_len().saturating_sub(1));
+        self.load_selection();
+    }
+
+    /// g/G in the content pane: jump the preview cursor to the first/last line.
+    pub fn content_to_top(&mut self) {
+        self.content.set_cursor(0);
+    }
+
+    pub fn content_to_bottom(&mut self) {
+        self.content.set_cursor(self.content_last_line());
+    }
+
     /// Enter/→: expand a directory, or (on a file) does nothing extra (already loaded).
     pub fn expand_or_open(&mut self) {
         if let Some(row) = self.row_at(self.tree.cursor()) {

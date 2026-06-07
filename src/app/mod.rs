@@ -1683,11 +1683,26 @@ impl App {
             }
             // In the diff, Enter expands the fold nearest the top of the viewport.
             KeyCode::Enter if self.focus == Focus::Diff => self.expand_active_fold(),
+            // →/l: in the tree, expand a dir or *enter* a file (focus its diff).
+            // ←/h: in the diff, *exit* back to the tree; in the tree, collapse.
+            // Mirrors the Repo tab so this navigation is identical across tabs.
             KeyCode::Right | KeyCode::Char('l') if self.focus == Focus::Tree => {
-                self.set_dir_collapsed(false)
+                let on_file = self
+                    .tree_rows()
+                    .get(self.tree_view.cursor())
+                    .is_some_and(|r| r.file_index().is_some());
+                if on_file {
+                    self.focus = Focus::Diff;
+                } else {
+                    self.set_dir_collapsed(false);
+                }
             }
-            KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Tree => {
-                self.set_dir_collapsed(true)
+            KeyCode::Left | KeyCode::Char('h') => {
+                if self.focus == Focus::Diff {
+                    self.focus = Focus::Tree;
+                } else {
+                    self.set_dir_collapsed(true);
+                }
             }
 
             KeyCode::Char('n') => self.select_next_file(),
@@ -1695,8 +1710,22 @@ impl App {
             KeyCode::Char(']') => self.next_hunk(),
             KeyCode::Char('[') => self.prev_hunk(),
 
-            KeyCode::Char('g') => self.diff_view.set_cursor(0),
-            KeyCode::Char('G') => self.diff_view.set_cursor(self.last_diff_row()),
+            // g/G act on the focused pane (tree row, or diff line) in both tabs.
+            KeyCode::Char('g') => match self.focus {
+                Focus::Tree => {
+                    self.tree_view.set_cursor(0);
+                    self.sync_selection();
+                }
+                Focus::Diff => self.diff_view.set_cursor(0),
+            },
+            KeyCode::Char('G') => match self.focus {
+                Focus::Tree => {
+                    let last = self.tree_rows().len().saturating_sub(1);
+                    self.tree_view.set_cursor(last);
+                    self.sync_selection();
+                }
+                Focus::Diff => self.diff_view.set_cursor(self.last_diff_row()),
+            },
 
             _ => {}
         }
@@ -1738,6 +1767,15 @@ impl App {
             },
             KeyCode::Char('d') if ctrl => self.browser.scroll_content_down(10),
             KeyCode::Char('u') if ctrl => self.browser.scroll_content_up(10),
+            // g/G act on the focused pane (tree row, or preview line) — same as Diff.
+            KeyCode::Char('g') => match self.focus {
+                Focus::Tree => self.browser.cursor_to_top(),
+                Focus::Diff => self.browser.content_to_top(),
+            },
+            KeyCode::Char('G') => match self.focus {
+                Focus::Tree => self.browser.cursor_to_bottom(),
+                Focus::Diff => self.browser.content_to_bottom(),
+            },
             KeyCode::Enter => {
                 if self.browser.cursor_is_dir() {
                     self.browser.toggle();

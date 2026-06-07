@@ -483,7 +483,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("g / G", "top / bottom"),
         ("Ctrl-d / u", "half-page down / up"),
         ("Enter", "open file · expand fold"),
-        ("h / l, ← / →", "collapse / expand dir"),
+        ("h / l, ← / →", "enter / exit file · collapse / expand dir"),
         ("s", "unified / side-by-side"),
         ("w", "word-level highlight"),
         ("o", "context window 3→10→30→100"),

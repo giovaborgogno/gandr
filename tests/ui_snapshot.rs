@@ -711,6 +711,27 @@ fn visual_select_copies_preview_lines_with_context() {
 }
 
 #[test]
+fn arrows_enter_and_exit_a_file_in_diff_tab() {
+    // The Diff tab must mirror the Repo tab: l/→ on a file enters its diff,
+    // h/← from the diff exits back to the tree (Tab still toggles too).
+    use gandr::app::Focus;
+    let fx = Fixture::new();
+    fx.write("a.txt", "hello\n");
+    fx.commit("init");
+    fx.write("a.txt", "hello world\n");
+    let mut app = app_from(&fx); // starts on the Diff tab, tree focused
+    assert_eq!(app.focus(), Focus::Tree, "starts focused on the tree");
+    app.handle_key(key('l')); // l on a file enters its diff
+    assert_eq!(app.focus(), Focus::Diff, "l on a file enters its diff");
+    app.handle_key(key('h')); // h from the diff exits back to the tree
+    assert_eq!(
+        app.focus(),
+        Focus::Tree,
+        "h from the diff exits to the tree"
+    );
+}
+
+#[test]
 fn arrows_enter_and_exit_a_file_in_files_tab() {
     use gandr::app::Focus;
     let fx = Fixture::new();
