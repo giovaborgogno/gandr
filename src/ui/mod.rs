@@ -26,21 +26,20 @@ pub(crate) const TREE_WIDTH: u16 = 34;
 /// Essential key hints for the keybar (key, label). The full list lives in `?`,
 /// so this stays a single, uncluttered line that fits a narrow (half) terminal.
 const KEYBAR: &[(&str, &str)] = &[
-    ("]/[", "hunk"),
     ("n/p", "file"),
+    ("]/[", "hunk"),
     ("Space", "review"),
     ("s", "split"),
     ("/", "find"),
-    ("c", "compare"),
     ("?", "help"),
 ];
 
 /// Essential key hints for the Files tab.
 const KEYBAR_FILES: &[(&str, &str)] = &[
     ("Enter", "open"),
-    ("h/l", "enter/exit"),
+    ("h/l", "in/out"),
     ("/", "find"),
-    ("f/F", "find repo"),
+    ("f/F", "finder"),
     ("v/y", "copy"),
     ("?", "help"),
 ];

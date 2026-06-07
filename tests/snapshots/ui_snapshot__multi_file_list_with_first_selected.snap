@@ -1,6 +1,6 @@
 ---
 source: tests/ui_snapshot.rs
-assertion_line: 99
+assertion_line: 100
 expression: "frame(&app, 80, 16)"
 ---
 " Diff [1]   Repo [2]                                     main · uncommitted · ◉ "
@@ -18,4 +18,4 @@ expression: "frame(&app, 80, 16)"
 "│                                ││                                            │"
 "│                                ││                                            │"
 "└────────────────────────────────┘└────────────────────────────────────────────┘"
-"]/[ hunk  n/p file  Space review  s split  / find  c compare  ? help            "
+"n/p file  ]/[ hunk  Space review  s split  / find  ? help                       "

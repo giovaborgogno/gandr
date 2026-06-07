@@ -1,6 +1,6 @@
 ---
 source: tests/ui_snapshot.rs
-assertion_line: 146
+assertion_line: 147
 expression: "styled_frame(&app, 60, 10)"
 ---
  Diff [1]   Repo [2]                 main · uncommitted · ◉ 
@@ -12,7 +12,7 @@ expression: "styled_frame(&app, 60, 10)"
 │                                ││    1 + the quick red f │
 │                                ││        ox              │
 └────────────────────────────────┘└────────────────────────┘
-]/[ hunk  n/p file  Space review  s split  / find  c compare
+n/p file  ]/[ hunk  Space review  s split  / find  ? help   
 ── backgrounds ──
 ............................................................
 ............................................................
