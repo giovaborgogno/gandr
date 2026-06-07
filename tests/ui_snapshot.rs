@@ -36,6 +36,7 @@ fn bg_legend(c: Color) -> char {
         Color::Rgb(36, 94, 52) => 'A',  // add, word-level changed
         Color::Rgb(58, 26, 28) => 'd',  // del background
         Color::Rgb(110, 40, 44) => 'D', // del, word-level changed
+        Color::Rgb(45, 55, 78) => 's',  // visual selection background
         Color::Reset => '.',
         _ => '?',
     }
@@ -784,10 +785,14 @@ fn visual_select_copies_diff_lines_with_context() {
     app.handle_key(key('l')); // enter the file's diff (focus the diff pane)
     app.handle_key(key('v')); // start the selection at the cursor
     app.handle_key(key('j')); // extend down one row
-    let mid = frame(&app, 80, 16); // render with the selection active (no panic)
+                              // The selection background must paint the whole selected rows — including the
+                              // code text, not just the gutter/padding (regression: context code stayed
+                              // unpainted). `s` is the selection bg in the background legend.
+    let styled = styled_frame(&app, 80, 16);
+    let painted = styled.lines().any(|l| l.matches('s').count() >= 10);
     assert!(
-        mid.contains("TWO"),
-        "the diff still renders mid-selection:\n{mid}"
+        painted,
+        "the selection bg should span the code on selected rows:\n{styled}"
     );
     app.handle_key(key('y')); // copy
     let text = app

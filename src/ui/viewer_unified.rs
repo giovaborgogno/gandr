@@ -195,6 +195,15 @@ fn line_rows_wrapped(
                 ));
             }
         }
+        // The composed text spans carry their own (diff/syntax) background, so the
+        // selection has to be stamped over every span — otherwise only the gutter
+        // and padding show it and a context line's code stays unpainted.
+        if selected {
+            spans = spans
+                .into_iter()
+                .map(|s| Span::styled(s.content, s.style.bg(SELECTION_BG)))
+                .collect();
+        }
         out.push(Line::from(spans));
     }
     if out.is_empty() {
