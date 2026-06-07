@@ -651,6 +651,24 @@ fn h_l_collapse_and_expand_dirs_in_files_tab() {
 }
 
 #[test]
+fn arrows_enter_and_exit_a_file_in_files_tab() {
+    use gandr::app::Focus;
+    let fx = Fixture::new();
+    fx.write("a.txt", "hello\n");
+    fx.commit("init");
+    fx.write("a.txt", "hello world\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab; cursor on a.txt (a top-level file)
+    assert_eq!(app.focus(), Focus::Tree, "starts focused on the tree");
+    let right = KeyEvent::new(KeyCode::Right, KeyModifiers::empty());
+    let left = KeyEvent::new(KeyCode::Left, KeyModifiers::empty());
+    app.handle_key(right); // → on a file enters its content pane
+    assert_eq!(app.focus(), Focus::Diff, "→ on a file enters its content");
+    app.handle_key(left); // ← from the content exits back to the tree
+    assert_eq!(app.focus(), Focus::Tree, "← from content exits to the tree");
+}
+
+#[test]
 fn tree_nav_wraps_around() {
     let fx = Fixture::new();
     fx.write("a.txt", "a\n");

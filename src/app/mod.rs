@@ -1677,8 +1677,26 @@ impl App {
                     self.focus = Focus::Diff; // focus the content pane
                 }
             }
-            KeyCode::Right | KeyCode::Char('l') => self.browser.expand_or_open(),
-            KeyCode::Left | KeyCode::Char('h') => self.browser.collapse(),
+            // →/l: in the tree, expand a dir or *enter* a file (focus its content);
+            // in the content pane it does nothing. (Tab still toggles focus too.)
+            KeyCode::Right | KeyCode::Char('l') => {
+                if self.focus == Focus::Tree {
+                    if self.browser.cursor_is_dir() {
+                        self.browser.expand_or_open();
+                    } else {
+                        self.focus = Focus::Diff; // enter the file
+                    }
+                }
+            }
+            // ←/h: in the content pane, *exit* back to the tree; in the tree,
+            // collapse the directory under the cursor.
+            KeyCode::Left | KeyCode::Char('h') => {
+                if self.focus == Focus::Diff {
+                    self.focus = Focus::Tree;
+                } else {
+                    self.browser.collapse();
+                }
+            }
             _ => {}
         }
     }
