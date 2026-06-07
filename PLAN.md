@@ -229,6 +229,9 @@ Each milestone is independently runnable and ends in a commit. After each, run t
 - [x] README demo GIF (VHS — `docs/demo.tape` + `docs/demo-setup.sh`), hosted on
       GitHub user-attachments so it renders on crates.io too.
 - [x] Repo URL confirmed: `github.com/giovaborgogno/gandr` (`repository`/`homepage`).
-- [ ] Create the GitHub repo and push (no `origin` remote yet).
+- [x] Marketing README (badges, "Why gandr?", install matrix incl. Homebrew).
+- [x] Homebrew formula prepared at `dist/homebrew/gandr.rb` (build-from-source).
 - [ ] Rename the working directory `difftui/` → `gandr/` to match the crate (manual; left to you).
-- [ ] `git tag v0.1.0` and `cargo publish` (run by you — not automated).
+- [ ] `git tag v0.1.0` + `cargo publish` (run by you — not automated).
+- [ ] Publish the Homebrew tap: create `giovaborgogno/homebrew-tap`, add
+      `dist/homebrew/gandr.rb` under `Formula/`, and fill its `sha256` from the v0.1.0 tarball.

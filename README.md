@@ -1,21 +1,39 @@
+<div align="center">
+
 # gandr
 
-**Review code changes and browse your repo, from the terminal.** A read-only TUI with the
-clarity of GitHub's diff view and the rendering quality of
-[`delta`](https://github.com/dandavison/delta). Built for one workflow: watching the changes
-an AI coding agent (like Claude Code) makes — live as it edits, or as the PR it opened — then
-exploring the rest of the codebase without leaving your terminal.
+### Review code changes and browse your repo — at terminal speed.
+
+A fast, read-only TUI for reviewing diffs and exploring repositories — the clarity of
+GitHub's side-by-side view with the rendering of [`delta`](https://github.com/dandavison/delta).
+Built for the AI-coding era: watch an agent's changes land **live**, review them, then search
+the whole codebase — without leaving your terminal.
+
+[![crates.io](https://img.shields.io/crates/v/gandr.svg?logo=rust)](https://crates.io/crates/gandr)
+[![downloads](https://img.shields.io/crates/d/gandr.svg)](https://crates.io/crates/gandr)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg?logo=rust)
 
 ![gandr in action](https://github.com/user-attachments/assets/766c2fca-513c-4b36-9702-00eb565a49c9)
 
-*Built for reviewing an AI agent's work — live. As Claude Code (left) edits, the changes
-stream into gandr (right): review the diff and search the whole repo without breaking flow.*
+</div>
+
+**Live review — your agent edits, you review.** As Claude Code (left) writes code, the changes
+stream into gandr (right): review the diff and search the whole repo without breaking flow.
 
 ![gandr reviewing an agent's changes live](https://github.com/user-attachments/assets/c33a56db-5d6f-49bb-a750-cfac1cf37115)
 
-> Status: feature-complete and stable. Two tabs — a **Diff** reviewer and a
-> **Repo** browser — with live refresh, review tracking, and repo-wide search.
-> A few DX extras are backlogged (config-file loading, copy, mouse) — see `PLAN.md`.
+## Why gandr?
+
+- **Fast at scale.** Windowed rendering and cached trees keep navigation instant on huge
+  repos (vscode's ~15.6k files, 1.3k-file diffs) — no lag per keystroke.
+- **Two tools in one.** A **Diff** reviewer *and* a **Repo** browser, in one keyboard-driven TUI.
+- **Built for agents.** Live auto-refresh + review tracking turn "my agent changed 30 files"
+  into a calm, reviewable flow.
+- **Zero external tools.** Diffing (libgit2), syntax highlighting (syntect), and search
+  (ripgrep's engine, fd-style file search) are all built in.
+- **Read-only & safe.** gandr never mutates your repo — only its own review state under
+  `.git/gandr/`.
 
 ## Features
 
@@ -78,11 +96,16 @@ Press `2` for the **Repo** browser, `1` to go back to the **Diff** reviewer.
 ## Install
 
 ```bash
-cargo install gandr           # from crates.io
-# or, from a clone:
+# Homebrew (macOS / Linux)
+brew install giovaborgogno/tap/gandr
+
+# Cargo (crates.io)
+cargo install gandr
+
+# From source
 cargo build --release         # binary at target/release/gandr
 ```
-Requires a Rust toolchain. `git` and `gh` (for PR mode) should be on PATH.
+`git` and `gh` (for PR mode) should be on PATH.
 
 ## Development
 

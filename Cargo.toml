@@ -11,7 +11,7 @@ homepage = "https://github.com/giovaborgogno/gandr"
 keywords = ["git", "diff", "tui", "review", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 # Keep the published crate lean: ship the source, drop agent/dev-only material.
-exclude = [".claude/", "docs/", "*.html", "AGENTS.md", "CLAUDE.md", "PLAN.md", "DESIGN.md"]
+exclude = [".claude/", "docs/", "dist/", "*.html", "AGENTS.md", "CLAUDE.md", "PLAN.md", "DESIGN.md"]
 publish = true
 
 [dependencies]
