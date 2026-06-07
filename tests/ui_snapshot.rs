@@ -651,6 +651,27 @@ fn h_l_collapse_and_expand_dirs_in_files_tab() {
 }
 
 #[test]
+fn repo_tab_marks_changed_files() {
+    let fx = Fixture::new();
+    fx.write("a.txt", "one\n");
+    fx.commit("init");
+    fx.write("a.txt", "two\n"); // modified
+    fx.write("b.txt", "new\n"); // added
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab
+    let out = frame(&app, 60, 14);
+    // the tree rows carry a colored M (modified) / A (added) marker in the gutter
+    assert!(
+        out.contains("M   a.txt"),
+        "a.txt should show an M marker in the tree:\n{out}"
+    );
+    assert!(
+        out.contains("A   b.txt"),
+        "b.txt should show an A marker in the tree:\n{out}"
+    );
+}
+
+#[test]
 fn arrows_enter_and_exit_a_file_in_files_tab() {
     use gandr::app::Focus;
     let fx = Fixture::new();

@@ -3,13 +3,26 @@
 
 use crate::app::{App, Focus};
 use crate::browser::EntryKind;
+use crate::git::Status;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 const TREE_WIDTH: u16 = 36;
+
+/// Tree color for a file's change status (matches a git-client palette).
+fn status_color(s: Status) -> Color {
+    match s {
+        Status::Added => Color::Green,
+        Status::Modified => Color::Yellow,
+        Status::Deleted => Color::Red,
+        Status::Renamed | Status::Copied => Color::Cyan,
+    }
+}
 
 pub fn render(app: &App, f: &mut Frame, area: Rect) {
     if !app.show_tree() {
@@ -36,6 +49,25 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
     let cursor = browser.cursor();
     let width = inner.width as usize;
 
+    // Which files/dirs changed in the current comparison (the same set as the
+    // Diff tab) — so the Repo browser shows at a glance what's modified. Files
+    // get a colored M/A/D marker; a directory containing changes gets a dot.
+    let root = &app.context().root;
+    let mut changed: HashMap<&Path, Status> = HashMap::new();
+    let mut changed_dirs: HashSet<PathBuf> = HashSet::new();
+    for fd in app.files() {
+        let p = fd.change.path.as_path();
+        changed.insert(p, fd.change.status);
+        let mut anc = p.parent();
+        while let Some(d) = anc {
+            if d.as_os_str().is_empty() {
+                break;
+            }
+            changed_dirs.insert(d.to_path_buf());
+            anc = d.parent();
+        }
+    }
+
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(scroll).take(height) {
         let selected = i == cursor;
@@ -44,20 +76,46 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
         } else {
             Style::default()
         };
+        let rel = row.path.strip_prefix(root).unwrap_or(&row.path);
+        let file_status = match row.kind {
+            EntryKind::File => changed.get(rel).copied(),
+            EntryKind::Dir { .. } => None,
+        };
+        let dir_touched = matches!(row.kind, EntryKind::Dir { .. }) && changed_dirs.contains(rel);
+
+        // 2-col status gutter, then the indented arrow/name.
+        let (mark, mark_color) = match (file_status, dir_touched) {
+            (Some(st), _) => (st.marker(), status_color(st)),
+            (None, true) => ('•', Color::DarkGray),
+            _ => (' ', Color::DarkGray),
+        };
         let indent = "  ".repeat(row.depth);
-        let text = match &row.kind {
+        let body = match &row.kind {
             EntryKind::Dir { expanded } => {
                 let arrow = if *expanded { '▾' } else { '▸' };
                 format!("{indent}{arrow} {}/", row.name)
             }
             EntryKind::File => format!("{indent}  {}", row.name),
         };
-        let style = match &row.kind {
-            EntryKind::Dir { .. } if !selected => row_style.fg(Color::Blue),
-            _ => row_style,
+        let body_style = if selected {
+            row_style
+        } else if let Some(st) = file_status {
+            row_style.fg(status_color(st))
+        } else if matches!(row.kind, EntryKind::Dir { .. }) {
+            row_style.fg(Color::Blue)
+        } else {
+            row_style
         };
-        let mut spans = vec![Span::styled(text.clone(), style)];
-        let used = text.chars().count();
+        let gutter_style = if selected {
+            row_style
+        } else {
+            Style::default().fg(mark_color)
+        };
+        let mut spans = vec![
+            Span::styled(format!("{mark} "), gutter_style),
+            Span::styled(body.clone(), body_style),
+        ];
+        let used = 2 + body.chars().count();
         if used < width {
             spans.push(Span::styled(" ".repeat(width - used), row_style));
         }
