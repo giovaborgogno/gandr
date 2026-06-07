@@ -9,8 +9,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 
 const TREE_WIDTH: u16 = 36;
 
@@ -52,21 +50,10 @@ fn render_tree(app: &App, f: &mut Frame, area: Rect) {
     // Which files/dirs changed in the current comparison (the same set as the
     // Diff tab) — so the Repo browser shows at a glance what's modified. Files
     // get a colored M/A/D marker; a directory containing changes gets a dot.
+    // Derived once per refresh (App::rebuild_repo_status), not rebuilt per frame.
     let root = &app.context().root;
-    let mut changed: HashMap<&Path, Status> = HashMap::new();
-    let mut changed_dirs: HashSet<PathBuf> = HashSet::new();
-    for fd in app.files() {
-        let p = fd.change.path.as_path();
-        changed.insert(p, fd.change.status);
-        let mut anc = p.parent();
-        while let Some(d) = anc {
-            if d.as_os_str().is_empty() {
-                break;
-            }
-            changed_dirs.insert(d.to_path_buf());
-            anc = d.parent();
-        }
-    }
+    let changed = app.repo_status();
+    let changed_dirs = app.repo_status_dirs();
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(scroll).take(height) {

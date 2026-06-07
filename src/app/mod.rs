@@ -8,7 +8,7 @@ use crate::config::{Config, ViewMode};
 use crate::diff::fold::{self, DiffRow};
 use crate::diff::{engine, FileDiff, Line as DiffLine};
 use crate::fuzzy;
-use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext};
+use crate::git::{base, CompareSpec, GitBackend, RefEntry, RepoContext, Status};
 use crate::highlight::{FgSpan, ThemeMode};
 use crate::review::{diff_hash, ReviewState, ReviewStatus};
 use crate::search::{SearchMode, SearchResults};
@@ -106,6 +106,11 @@ pub struct App {
     /// (not per keystroke). Handed out as a cheap `Rc` clone.
     tree_cache: RefCell<Rc<Vec<Row>>>,
     tree_dirty: Cell<bool>,
+    /// Change status of each changed file (and the set of directories that
+    /// contain a change), derived once per refresh so the Repo tree can mark
+    /// modified files without rebuilding this every frame.
+    repo_status: HashMap<PathBuf, Status>,
+    repo_status_dirs: HashSet<PathBuf>,
     /// Diff-viewport height from the last render, for page/bottom math.
     viewport: Cell<usize>,
     /// Cached stateful syntax-highlight spans for the selected file's old/new
@@ -256,6 +261,8 @@ impl App {
             tree_scroll: Cell::new(0),
             tree_cache: RefCell::new(Rc::new(Vec::new())),
             tree_dirty: Cell::new(true),
+            repo_status: HashMap::new(),
+            repo_status_dirs: HashSet::new(),
             viewport: Cell::new(0),
             diff_hl: RefCell::new(DiffHighlight::default()),
             hl_requested: None,
@@ -291,6 +298,7 @@ impl App {
         };
         app.reset_view();
         app.recompute_review();
+        app.rebuild_repo_status();
         Ok(app)
     }
 
@@ -659,6 +667,34 @@ impl App {
         self.tree_dirty.set(true);
     }
 
+    /// Recompute the Repo-tree change markers from the current file set (done
+    /// once per refresh, not per frame).
+    fn rebuild_repo_status(&mut self) {
+        self.repo_status.clear();
+        self.repo_status_dirs.clear();
+        for fd in &self.files {
+            let p = &fd.change.path;
+            self.repo_status.insert(p.clone(), fd.change.status);
+            let mut anc = p.parent();
+            while let Some(d) = anc {
+                if d.as_os_str().is_empty() {
+                    break;
+                }
+                self.repo_status_dirs.insert(d.to_path_buf());
+                anc = d.parent();
+            }
+        }
+    }
+
+    /// Change status of each changed file (for the Repo tree markers).
+    pub fn repo_status(&self) -> &HashMap<PathBuf, Status> {
+        &self.repo_status
+    }
+    /// Directories that contain at least one changed file.
+    pub fn repo_status_dirs(&self) -> &HashSet<PathBuf> {
+        &self.repo_status_dirs
+    }
+
     /// The cursor row in the tree.
     pub fn tree_cursor(&self) -> usize {
         self.tree_cursor
@@ -912,6 +948,7 @@ impl App {
         // The file set (and thus old/new text) changed: drop per-file caches so a
         // same-path working-tree edit doesn't reuse stale content/colors/folds.
         self.invalidate_tree();
+        self.rebuild_repo_status();
         self.invalidate_file_caches();
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
