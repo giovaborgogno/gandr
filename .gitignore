@@ -15,3 +15,12 @@ Cargo.lock.orig
 
 # local agent scratch
 /.scratch/
+
+# locally-installed agent skills (symlinks) + their content — not part of gandr.
+# Keep only the project's own skills under .claude/skills/.
+/.agents/
+/skills-lock.json
+/.claude/skills/*
+!/.claude/skills/new-fixture
+!/.claude/skills/next-milestone
+!/.claude/skills/verify-tui
