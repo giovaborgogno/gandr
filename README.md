@@ -62,6 +62,10 @@ stream into gandr (right): review the diff and search the whole repo without bre
 **Everywhere**
 - Theme auto-detected from your terminal background (light/dark).
 - Open-in-editor (`e` → `$VISUAL`/`$EDITOR` at the current line), help overlay (`?`).
+- **Select & copy** (`v` then `y`): grab lines from the preview with a `path:line`
+  header — ready to paste back to your agent.
+- **Works without git too.** Open gandr in any folder; outside a repo it's a fast,
+  read-only file browser (the Diff tab is just empty).
 
 Read-only by design — gandr never modifies your repo (review state lives under
 `.git/gandr/`).

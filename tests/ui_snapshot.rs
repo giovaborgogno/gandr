@@ -672,6 +672,24 @@ fn repo_tab_marks_changed_files() {
 }
 
 #[test]
+fn opens_a_non_git_directory_in_files_only_mode() {
+    use gandr::git::null_backend::NullBackend;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hi\n").unwrap();
+    let backend = Box::new(NullBackend::new(dir.path().to_path_buf()));
+    let mut app = App::new(Config::default(), backend, CompareSpec::Uncommitted)
+        .expect("a non-git directory should open");
+    app.set_files_only();
+    assert!(app.files_only());
+    // Starts on the Repo browser, which lists the directory's files.
+    let out = frame(&app, 80, 12);
+    assert!(
+        out.contains("hello.txt"),
+        "the Repo tree should list the file:\n{out}"
+    );
+}
+
+#[test]
 fn visual_select_copies_preview_lines_with_context() {
     let fx = Fixture::new();
     fx.write("note.txt", "alpha\nbeta\ngamma\n");

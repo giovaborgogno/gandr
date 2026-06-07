@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 pub mod base;
 pub mod git2_backend;
+pub mod null_backend;
 
 /// What to compare. The bare `gandr` default is [`CompareSpec::Uncommitted`].
 #[derive(Debug, Clone, PartialEq, Eq)]

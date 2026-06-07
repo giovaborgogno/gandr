@@ -518,19 +518,9 @@ fn render_file_list(app: &App, f: &mut Frame, area: Rect) {
     );
 }
 
-/// A friendly, centered placeholder when the comparison has no differences.
+/// A friendly, centered placeholder when there's no diff to show — either the
+/// comparison is empty, or gandr was opened outside a git repo (files-only).
 fn render_empty_state(app: &App, f: &mut Frame, area: Rect) {
-    // Say *which* comparison is empty, so the header isn't the only place that
-    // tells you what you're looking at.
-    let subtitle = match app.compare_against() {
-        Some(r) => format!("working tree matches {r}"),
-        None => match app.comparison_label().as_str() {
-            "uncommitted" => "your working tree is clean".to_string(),
-            "staged" => "nothing is staged".to_string(),
-            _ => "this comparison is empty".to_string(),
-        },
-    };
-    let subtitle_w = subtitle.chars().count() as u16;
     let hint = |k: &'static str, label: &'static str| {
         Line::from(vec![
             Span::styled(
@@ -543,22 +533,54 @@ fn render_empty_state(app: &App, f: &mut Frame, area: Rect) {
         ])
         .alignment(ratatui::layout::Alignment::Left)
     };
-    let lines = vec![
-        Line::from(Span::styled(
+    let (title, title_color, subtitle, hints) = if app.files_only() {
+        (
+            "Not a git repository",
+            Color::Yellow,
+            "browse, preview and search files in the Repo tab".to_string(),
+            vec![
+                hint("2", "browse the repository"),
+                hint("/", "search files & contents"),
+                hint("q", "quit"),
+            ],
+        )
+    } else {
+        // Say *which* comparison is empty, so the header isn't the only place
+        // that tells you what you're looking at.
+        let subtitle = match app.compare_against() {
+            Some(r) => format!("working tree matches {r}"),
+            None => match app.comparison_label().as_str() {
+                "uncommitted" => "your working tree is clean".to_string(),
+                "staged" => "nothing is staged".to_string(),
+                _ => "this comparison is empty".to_string(),
+            },
+        };
+        (
             "✓  No changes to review",
+            Color::Green,
+            subtitle,
+            vec![
+                hint("c", "compare against…"),
+                hint("b", "pick a branch or tag"),
+                hint("2", "browse the repository"),
+                hint("r", "refresh"),
+            ],
+        )
+    };
+    let subtitle_w = subtitle.chars().count() as u16;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            title,
             Style::default()
-                .fg(Color::Green)
+                .fg(title_color)
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(ratatui::layout::Alignment::Center),
         Line::from(Span::styled(subtitle, Style::default().fg(Color::DarkGray)))
             .alignment(ratatui::layout::Alignment::Center),
         Line::raw(""),
-        hint("c", "compare against…"),
-        hint("b", "pick a branch or tag"),
-        hint("2", "browse the repository"),
-        hint("r", "refresh"),
     ];
+    lines.extend(hints);
     // Center the block vertically; keep a left-aligned hint column readable.
     let h = lines.len() as u16;
     let y = area.y + area.height.saturating_sub(h) / 2;

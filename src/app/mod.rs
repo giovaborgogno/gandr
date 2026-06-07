@@ -180,6 +180,9 @@ pub struct App {
     editor_request: Option<(PathBuf, u32)>,
     /// Pending clipboard text (copy a selection), emitted via OSC 52 by run_loop.
     clipboard_request: Option<String>,
+    /// Files-only mode: opened outside a git repo, so the Diff tab is empty and
+    /// only the Repo browser is useful.
+    files_only: bool,
     should_quit: bool,
 }
 
@@ -294,6 +297,7 @@ impl App {
             pending_search: None,
             editor_request: None,
             clipboard_request: None,
+            files_only: false,
             should_quit: false,
         };
         app.reset_view();
@@ -1010,6 +1014,17 @@ impl App {
     /// Take pending clipboard text (run_loop emits it via OSC 52), if any.
     pub fn take_clipboard_request(&mut self) -> Option<String> {
         self.clipboard_request.take()
+    }
+    /// Switch into files-only mode (opened outside a git repo): there's nothing
+    /// to diff, so start on the Repo browser.
+    pub fn set_files_only(&mut self) {
+        self.files_only = true;
+        self.tab = Tab::Files;
+        self.focus = Focus::Tree;
+    }
+    /// Whether gandr was opened outside a git repo (the Diff tab is empty).
+    pub fn files_only(&self) -> bool {
+        self.files_only
     }
 
     /// Queue opening the selected file in `$EDITOR`. In the Diff tab this is the
@@ -1753,14 +1768,36 @@ impl App {
 /// Open the repository at the current directory, resolve the comparison, and run.
 pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     use crate::git::git2_backend::Git2Backend;
+    use crate::git::null_backend::NullBackend;
 
     let cwd = std::env::current_dir().context("get current directory")?;
-    let backend = Git2Backend::open(&cwd)?;
     let smart = inv.smart || config.smart_compare;
     let theme_choice = config.theme;
-    let resolved = base::resolve(&backend, inv.spec, smart, &config.base_branches)?;
 
-    let mut app = App::with_title(config, Box::new(backend), resolved.spec, resolved.title)?;
+    // Outside a git repo, open in files-only mode (browse/preview/search the
+    // filesystem; the Diff tab is empty). Inside one, resolve the comparison.
+    let (backend, spec, title, files_only): (
+        Box<dyn GitBackend>,
+        CompareSpec,
+        Option<String>,
+        bool,
+    ) = match Git2Backend::open(&cwd) {
+        Ok(backend) => {
+            let resolved = base::resolve(&backend, inv.spec, smart, &config.base_branches)?;
+            (Box::new(backend), resolved.spec, resolved.title, false)
+        }
+        Err(_) => (
+            Box::new(NullBackend::new(cwd.clone())),
+            CompareSpec::Uncommitted,
+            None,
+            true,
+        ),
+    };
+
+    let mut app = App::with_title(config, backend, spec, title)?;
+    if files_only {
+        app.set_files_only();
+    }
 
     // Resolve the theme mode — detection must happen before raw mode / alt-screen.
     let mode = match theme_choice {
