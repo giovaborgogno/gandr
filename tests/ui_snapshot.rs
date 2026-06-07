@@ -557,16 +557,18 @@ fn slash_searches_the_open_preview_file_in_the_repo_tab() {
 
 #[test]
 fn finder_opens_in_file_or_content_mode_and_tab_toggles() {
+    use gandr::app::SearchScope;
     use gandr::search::SearchMode;
     let fx = Fixture::new();
     fx.write("a.rs", "x\n");
     fx.commit("init");
-    let mut app = app_from(&fx); // Diff tab — the finder is global
-    app.handle_key(key('f')); // file-name mode
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Repo tab — f/F are repo-wide here
+    app.handle_key(key('f')); // file-name mode, repo scope
+    assert_eq!(app.repo_search().map(|rs| rs.mode), Some(SearchMode::Files));
     assert_eq!(
-        app.repo_search().map(|rs| rs.mode),
-        Some(SearchMode::Files),
-        "f opens the finder in file-name mode"
+        app.repo_search().map(|rs| rs.scope),
+        Some(SearchScope::Repo)
     );
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())); // Tab → content
     assert_eq!(
@@ -578,6 +580,69 @@ fn finder_opens_in_file_or_content_mode_and_tab_toggles() {
     assert_eq!(
         app.repo_search().map(|rs| rs.mode),
         Some(SearchMode::Content)
+    );
+}
+
+#[test]
+fn content_finder_quickfix_walks_matches_across_files() {
+    // `F` (repo content) opens a quickfix list; after jumping, n/N step every
+    // match across the whole repo, crossing files (nvim :cnext model).
+    let fx = Fixture::new();
+    fx.write("a.rs", "let needle = 1;\n");
+    fx.write("b.rs", "fn f() { needle(); }\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    let root = app.context().root.clone();
+    app.handle_key(key('F')); // repo-wide content finder
+    for c in "needle".chars() {
+        app.handle_key(key(c));
+    }
+    run_pending_search(&mut app, &root);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // jump → quickfix
+    assert_eq!(
+        app.quickfix().map(|qf| qf.matches.len()),
+        Some(2),
+        "two matches across two files"
+    );
+    let first = app.browser().loaded().expect("a file is open").path.clone();
+    app.handle_key(key('n')); // next match — should be the *other* file
+    let second = app.browser().loaded().expect("a file is open").path.clone();
+    assert_ne!(first, second, "n steps across files, not within one");
+    app.handle_key(key('n')); // wraps back to the first match/file
+    let third = app.browser().loaded().expect("a file is open").path.clone();
+    assert_eq!(first, third, "n wraps around the repo-wide match list");
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())); // clears quickfix
+    assert!(app.quickfix().is_none());
+    assert_eq!(app.browser_query(), None);
+}
+
+#[test]
+fn f_in_diff_tab_finds_among_changed_files_and_jumps_in_place() {
+    use gandr::app::{Focus, SearchScope, Tab};
+    let fx = Fixture::new();
+    fx.write("alpha.txt", "a\n");
+    fx.write("beta.txt", "b\n");
+    fx.commit("init");
+    fx.write("alpha.txt", "a2\n"); // both changed
+    fx.write("beta.txt", "b2\n");
+    let mut app = app_from(&fx); // Diff tab, cursor on the first changed file
+    app.handle_key(key('f')); // diff-scoped finder
+    assert_eq!(
+        app.repo_search().map(|rs| rs.scope),
+        Some(SearchScope::DiffFiles),
+        "f in the Diff tab opens the diff-scoped finder, not the repo-wide one"
+    );
+    for c in "beta".chars() {
+        app.handle_key(key(c));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())); // jump to beta.txt
+    assert_eq!(app.tab(), Tab::Diff, "the jump stays in the Diff tab");
+    assert_eq!(app.focus(), Focus::Diff, "and focuses the diff");
+    assert!(app.repo_search().is_none(), "the finder closes on jump");
+    assert!(
+        app.current()
+            .is_some_and(|f| f.change.path.ends_with("beta.txt")),
+        "the selected diff file is now beta.txt"
     );
 }
 

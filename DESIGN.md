@@ -86,7 +86,7 @@ uncommitted diff.
 | `Space` | mark file reviewed |
 | `o` | collapse / expand file or context block |
 | `/` | **find in the current view** (diff: whole changeset · Repo: open file); `n`/`N` next/prev match (see ADR 0007) |
-| `f` `F` | **find in the repo**: by file name (`f`) / by contents (`F`); `Tab` toggles mode. Works from either tab |
+| `f` `F` | **finder**: `f` by file name (Diff tab: scoped to changed files, jumps in place; else repo-wide) · `F` repo-wide contents → quickfix list, `n`/`N` walk every match across files. `Tab` toggles mode (see ADR 0007) |
 | `e` | open file in `$EDITOR` at the current line |
 | `y` | copy path / selection |
 | `r` | manual refresh · `a` toggle auto-refresh |

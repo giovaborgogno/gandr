@@ -172,6 +172,9 @@ pub struct App {
     ref_picker: Option<RefPicker>,
     /// Repo-wide search overlay (Files tab), open when `Some`.
     repo_search: Option<RepoSearch>,
+    /// Quickfix list from a content finder (`F`) jump: every match across the
+    /// repo, with the current index. `n`/`N` step it, crossing files.
+    quickfix: Option<Quickfix>,
     /// Monotonic token; a background search result is applied only if it matches.
     search_epoch: u64,
     /// A queued async search the event loop should spawn: (epoch, query, mode).
@@ -186,15 +189,34 @@ pub struct App {
     should_quit: bool,
 }
 
-/// Repo-wide search (Files tab): a live query over file names or contents, with
-/// a results list you navigate (↑/↓) and jump into (Enter). `Tab` flips the mode.
+/// What a finder searches over: the whole repo, or just the diff's changed files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchScope {
+    /// `f`/`F` from the Repo tab (and `F` anywhere): the whole working tree.
+    Repo,
+    /// `f` from the Diff tab: only the changed files, jumping within the diff.
+    DiffFiles,
+}
+
+/// The finder (`f`/`F`): a live query with a results list you navigate (↑/↓) and
+/// jump into (Enter). For the repo scope, `Tab` flips file-name ⇄ content mode.
 pub struct RepoSearch {
     pub query: String,
     pub mode: SearchMode,
+    pub scope: SearchScope,
     pub results: SearchResults,
     pub selected: usize,
     /// Whether a background search for the current query is in flight.
     pub loading: bool,
+}
+
+/// A repo-wide content-search result set you step through with `n`/`N`, jumping
+/// between files (the nvim `:grep` → quickfix model). Left active after an `F`
+/// content jump until a new search replaces it.
+pub struct Quickfix {
+    pub matches: Vec<crate::search::ContentMatch>,
+    pub idx: usize,
+    pub query: String,
 }
 
 /// Shared, per-line syntax-highlight spans for one side of a file (one span list
@@ -294,6 +316,7 @@ impl App {
             ref_picker: None,
             repo_search: None,
             search_epoch: 0,
+            quickfix: None,
             pending_search: None,
             editor_request: None,
             clipboard_request: None,
@@ -1293,22 +1316,70 @@ impl App {
     /// `/` find first so only one search owns `n`/`N` at a time (option B).
     fn open_finder(&mut self, mode: SearchMode) {
         self.search = None;
+        self.quickfix = None;
         self.search_epoch += 1;
         self.pending_search = None;
         self.browser_query = None; // a new search supersedes the old highlight
         self.repo_search = Some(RepoSearch {
             query: String::new(),
             mode,
+            scope: SearchScope::Repo,
             results: Self::empty_results(mode),
             selected: 0,
             loading: false,
         });
     }
 
+    /// Open the diff-scoped file finder (`f` in the Diff tab): fuzzy over the
+    /// changed files, jumping within the diff (it never leaves the Diff tab).
+    fn open_diff_file_finder(&mut self) {
+        self.search = None;
+        self.quickfix = None;
+        self.browser_query = None;
+        self.search_epoch += 1;
+        self.pending_search = None;
+        self.repo_search = Some(RepoSearch {
+            query: String::new(),
+            mode: SearchMode::Files,
+            scope: SearchScope::DiffFiles,
+            results: SearchResults::Files(Vec::new()),
+            selected: 0,
+            loading: false,
+        });
+    }
+
+    /// Changed-file paths matching `query` (smart-case substring), for the
+    /// diff-scoped finder — computed synchronously from the in-memory diff.
+    fn diff_file_matches(&self, query: &str) -> Vec<std::path::PathBuf> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let sensitive = query.chars().any(|c| c.is_uppercase());
+        let needle = if sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+        self.files
+            .iter()
+            .map(|f| f.change.path.clone())
+            .filter(|p| {
+                let hay = p.to_string_lossy();
+                if sensitive {
+                    hay.contains(&needle)
+                } else {
+                    hay.to_lowercase().contains(&needle)
+                }
+            })
+            .collect()
+    }
+
     /// Open the in-view find (`/`): searches the diff (Diff tab) or the open
     /// preview file (Repo tab). Closes the finder first (option B).
     fn open_search(&mut self) {
         self.repo_search = None;
+        self.quickfix = None;
         self.pending_search = None;
         self.browser_query = None;
         self.search = Some(Search {
@@ -1379,6 +1450,18 @@ impl App {
         let Some(rs) = self.repo_search.as_ref() else {
             return;
         };
+        // The diff-scoped finder searches the in-memory changed files — resolve
+        // it synchronously, no background job.
+        if rs.scope == SearchScope::DiffFiles {
+            let results = SearchResults::Files(self.diff_file_matches(&rs.query.clone()));
+            if let Some(rs) = self.repo_search.as_mut() {
+                rs.results = results;
+                rs.loading = false;
+                rs.selected = 0;
+            }
+            self.pending_search = None;
+            return;
+        }
         let query = rs.query.clone();
         let mode = rs.mode;
         self.search_epoch += 1;
@@ -1433,31 +1516,58 @@ impl App {
     /// Jump to the selected result: reveal it in the browser (at its line for a
     /// content hit), focus the content pane, and close the overlay.
     fn jump_to_result(&mut self) {
-        let root = self.context.root.clone();
-        let target = self.repo_search.as_ref().and_then(|rs| match &rs.results {
-            SearchResults::Files(v) => v.get(rs.selected).map(|p| (root.join(p), None)),
-            SearchResults::Content(v) => v
-                .get(rs.selected)
-                .map(|m| (root.join(&m.path), Some(m.line as usize))),
-        });
-        // For a content hit, keep the query so the preview highlights it and n/N
-        // can step through its occurrences in the opened file.
-        let query = self.repo_search.as_ref().and_then(|rs| match rs.results {
-            SearchResults::Content(_) if !rs.query.is_empty() => Some(rs.query.clone()),
+        // Diff-scoped finder: the selected result is a changed file — select it
+        // in the diff and stay on the Diff tab (no Repo detour).
+        if self.repo_search.as_ref().map(|rs| rs.scope) == Some(SearchScope::DiffFiles) {
+            let picked = self.repo_search.as_ref().and_then(|rs| match &rs.results {
+                SearchResults::Files(v) => v.get(rs.selected).cloned(),
+                SearchResults::Content(_) => None,
+            });
+            if let Some(path) = picked {
+                if let Some(idx) = self.files.iter().position(|f| f.change.path == path) {
+                    self.select_file(idx);
+                    self.focus = Focus::Diff;
+                }
+            }
+            self.repo_search = None;
+            self.pending_search = None;
+            return;
+        }
+        // A content search opens a quickfix list (every match across the repo);
+        // n/N step it, crossing files. A file-name search just opens the file.
+        let content = self.repo_search.as_ref().and_then(|rs| match &rs.results {
+            SearchResults::Content(v) if !v.is_empty() => {
+                Some((v.clone(), rs.selected, rs.query.clone()))
+            }
             _ => None,
         });
-        if let Some((abs, line)) = target {
-            self.browser.reveal(&abs, line);
-            // A content jump becomes a committed in-file `/` search of that file,
-            // so the keybar shows the match counter and n/N flow through the one
-            // search state machine (option B) — not a parallel browser_query path.
-            self.browser_query = query.clone();
-            self.search = query.map(|q| Search {
-                query: q,
-                editing: false,
-            });
+        if let Some((matches, idx, query)) = content {
+            self.search = None;
+            self.repo_search = None;
+            self.pending_search = None;
+            self.browser_query = (!query.is_empty()).then(|| query.clone());
             self.tab = Tab::Files; // a finder jump always lands in the Repo preview
             self.focus = Focus::Diff; // focus the content pane
+            self.quickfix = Some(Quickfix {
+                matches,
+                idx,
+                query,
+            });
+            self.reveal_quickfix();
+            return;
+        }
+        // File-name result: just open the file (no quickfix, no highlight).
+        let root = self.context.root.clone();
+        let target = self.repo_search.as_ref().and_then(|rs| match &rs.results {
+            SearchResults::Files(v) => v.get(rs.selected).map(|p| root.join(p)),
+            SearchResults::Content(_) => None,
+        });
+        if let Some(abs) = target {
+            self.browser.reveal(&abs, None);
+            self.browser_query = None;
+            self.search = None;
+            self.tab = Tab::Files;
+            self.focus = Focus::Diff;
             self.repo_search = None;
             self.pending_search = None;
         }
@@ -1466,6 +1576,47 @@ impl App {
     /// The active Files-preview highlight query, if any.
     pub fn browser_query(&self) -> Option<&str> {
         self.browser_query.as_deref()
+    }
+
+    /// The active quickfix list (repo-wide content matches from `F`), if any.
+    pub fn quickfix(&self) -> Option<&Quickfix> {
+        self.quickfix.as_ref()
+    }
+
+    /// Reveal the quickfix list's current match (its file, scrolled to the line).
+    fn reveal_quickfix(&mut self) {
+        let target = self
+            .quickfix
+            .as_ref()
+            .and_then(|qf| qf.matches.get(qf.idx))
+            .map(|m| (self.context.root.join(&m.path), m.line as usize));
+        if let Some((abs, line)) = target {
+            self.browser.reveal(&abs, Some(line));
+        }
+    }
+
+    /// Step the quickfix list to the next/previous match (wrapping), crossing
+    /// files — the nvim `:cnext`/`:cprev` model.
+    fn quickfix_step(&mut self, forward: bool) {
+        let Some(qf) = self.quickfix.as_mut() else {
+            return;
+        };
+        let n = qf.matches.len();
+        if n == 0 {
+            return;
+        }
+        qf.idx = if forward {
+            (qf.idx + 1) % n
+        } else {
+            (qf.idx + n - 1) % n
+        };
+        self.reveal_quickfix();
+    }
+
+    /// Drop the quickfix list and its preview highlight.
+    fn close_quickfix(&mut self) {
+        self.quickfix = None;
+        self.browser_query = None;
     }
 
     /// Move the preview to the next/previous line matching `browser_query`.
@@ -1506,8 +1657,12 @@ impl App {
                 self.pending_search = None;
             }
             KeyCode::Tab => {
+                // Mode toggle only applies to the repo-wide finder; the
+                // diff-scoped finder is file-name-only.
                 if let Some(rs) = self.repo_search.as_mut() {
-                    rs.mode = rs.mode.toggled();
+                    if rs.scope == SearchScope::Repo {
+                        rs.mode = rs.mode.toggled();
+                    }
                 }
                 self.request_search();
             }
@@ -1744,6 +1899,7 @@ impl App {
                 self.picker = None;
                 self.search = None;
                 self.repo_search = None;
+                self.quickfix = None;
                 self.pending_search = None;
                 self.browser_query = None;
                 return;
@@ -1754,6 +1910,7 @@ impl App {
                 self.search = None;
                 self.ref_picker = None;
                 self.repo_search = None;
+                self.quickfix = None;
                 self.pending_search = None;
                 self.browser_query = None; // drop any in-view highlight (symmetry with `1`)
                 return;
@@ -1766,10 +1923,16 @@ impl App {
                 }
                 return;
             }
-            // Repo-wide finder (both tabs): `f` by file name, `F` by content.
-            // `Tab` toggles the mode while it's open.
+            // Finder: `f` by file name, `F` by content. `f` is contextual — in
+            // the Diff tab it searches only the changed files and jumps within
+            // the diff; elsewhere it's repo-wide. `F` (content) is always
+            // repo-wide. `Tab` toggles the mode while a repo finder is open.
             KeyCode::Char('f') => {
-                self.open_finder(SearchMode::Files);
+                if self.tab == Tab::Diff {
+                    self.open_diff_file_finder();
+                } else {
+                    self.open_finder(SearchMode::Files);
+                }
                 return;
             }
             KeyCode::Char('F') => {
@@ -1898,6 +2061,11 @@ impl App {
         match key.code {
             KeyCode::Char('/') => self.open_search(), // find in the open preview file
             KeyCode::Char('e') => self.open_editor(),
+            // Step the quickfix list (repo-wide content matches from `F`) across
+            // files. Only when no in-view `/` search is active (search_key owns
+            // n/N then, before this handler runs).
+            KeyCode::Char('n') if self.quickfix.is_some() => self.quickfix_step(true),
+            KeyCode::Char('N') if self.quickfix.is_some() => self.quickfix_step(false),
             // Visual selection in the preview: `v` start/clear, `y` copy (with a
             // `path:start-end` header) to the clipboard, Esc cancel.
             KeyCode::Char('v') if self.focus == Focus::Diff => {
@@ -1909,6 +2077,9 @@ impl App {
                     self.browser.content_clear_selection();
                 }
             }
+            // Esc clears the quickfix list (and its highlight) first, else cancels
+            // any visual selection.
+            KeyCode::Esc if self.quickfix.is_some() => self.close_quickfix(),
             KeyCode::Esc => self.browser.content_clear_selection(),
             KeyCode::Tab => {
                 self.focus = match self.focus {

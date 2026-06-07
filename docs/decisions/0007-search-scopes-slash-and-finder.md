@@ -20,16 +20,21 @@ yazi `s`/`S`, nvim telescope/`:grep`+quickfix). `/` never changes meaning by con
      views differ (the Diff view *is* the multi-file changeset; the Repo preview is one
      file). Commit (`Enter`) lands on the first match at-or-after the cursor; `n`/`N`
      step strictly after/before, wrapping.
-2. **`f` / `F` = the repo-wide finder**, available from **both** tabs: `f` opens it by
-   file name, `F` by contents; `Tab` toggles the mode while open. A jump lands in the
-   Repo preview at the match; `n`/`N` then steps that file (unchanged behavior).
-3. **One search active at a time ("last wins").** Opening `/` closes the finder and
-   vice-versa, so `n`/`N` is never ambiguous.
+2. **The finder is `f` (by file name) / `F` (by contents); `Tab` toggles the mode.**
+   `f` is **contextual**: in the Diff tab it searches only the *changed files* and jumps
+   within the diff (never leaving the tab); elsewhere (and `F` always) it's repo-wide and
+   lands in the Repo preview.
+3. **Repo-wide content search opens a quickfix list.** After an `F` jump, `n`/`N` step
+   **every match across the whole repo**, crossing files (the nvim `:grep` → `:cnext`
+   model). The keybar shows `[i/n] across repo`; `Esc` closes the list.
+4. **One search active at a time ("last wins").** Opening `/`, `f`, or `F` clears the
+   others (the in-view find, the finder overlay, and the quickfix list), so `n`/`N` is
+   never ambiguous.
 
 ## Consequences
-- `/` finally means one thing everywhere; the powerful finder becomes a global navigator
-  (a natural fit if the two tabs ever merge into one view).
-- Repo-wide *content* stepping after a finder jump stays in-file for now (matches the
-  prior behavior). A future cross-file "quickfix walk" (step every match across all files,
-  nvim `:cnext`-style) is left as a follow-up; it would not change these key bindings.
-- Supersedes the `/` row of the DESIGN.md keymap (updated alongside this ADR).
+- `/` means one thing everywhere; `f`/`F` are the project-wide navigator. `f` is scoped to
+  the view's natural corpus (changed files in the Diff, the whole tree in the Repo), the
+  same principle that governs `/`.
+- The quickfix list is the third piece of search state (alongside the in-view `/` and the
+  finder overlay); each entry point clears the other two to keep `n`/`N` unambiguous.
+- Supersedes the `/` and finder rows of the DESIGN.md keymap (updated alongside this ADR).

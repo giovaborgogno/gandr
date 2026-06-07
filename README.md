@@ -58,8 +58,9 @@ stream into gandr (right): review the diff and search the whole repo without bre
   syntax-highlighted, line-cursored preview.
 - **Find in the open file** (`/`): in-view search of the preview, `n`/`N` to step.
 - **Repo-wide finder** (`f` / `F`): by file name (fd-style, respects `.gitignore`) or by
-  contents (ripgrep's engine) — jump straight to the file and line. Works from either tab.
-  No external binaries.
+  contents (ripgrep's engine). Content matches open a quickfix list — `n`/`N` walk every
+  hit across the whole repo. Works from either tab; no external binaries. (In the Diff tab,
+  `f` is scoped to the changed files and jumps in place.)
 
 **Everywhere**
 - Theme auto-detected from your terminal background (light/dark).
@@ -97,7 +98,7 @@ Press `2` for the **Repo** browser, `1` to go back to the **Diff** reviewer.
 | `Space` | mark file reviewed |
 | `c` · `b` | compare menu · branch/tag picker |
 | `/` (then `n`/`N`) | find in the current view (the diff, or the open file) |
-| `f` · `F` | find in the repo: by file name · by contents (`Tab` toggles) |
+| `f` · `F` | find files (Diff: changed files, jumps in place) · grep repo contents → `n`/`N` walk all matches across files |
 | `1` / `2` | Diff / Repo tab · `e` open in `$EDITOR` · `z` hide tree · `?` help · `q` quit |
 
 ## Install
