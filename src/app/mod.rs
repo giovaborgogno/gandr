@@ -1018,6 +1018,10 @@ impl App {
         self.invalidate_tree();
         self.rebuild_repo_status();
         self.invalidate_file_caches();
+        // Keep the Repo tab live too: re-read its tree + open preview from disk,
+        // and let the preview re-highlight (the request is deduped by path).
+        self.browser.reload();
+        self.browser_hl_requested = None;
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
         {

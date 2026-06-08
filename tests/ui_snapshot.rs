@@ -259,6 +259,35 @@ fn refresh_preserves_selected_file() {
     assert_eq!(app.selected(), before);
 }
 
+#[test]
+fn repo_preview_and_tree_update_on_refresh() {
+    // A live refresh (what the file watcher drives) must also re-read the Repo
+    // tab: the open preview's content and new files in the tree.
+    let fx = Fixture::new();
+    fx.write("a.txt", "old line\n");
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Repo tab
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // open a.txt
+    assert!(
+        frame(&app, 80, 14).contains("old line"),
+        "preview shows the original content"
+    );
+    // The agent edits the open file and adds a new one, then a refresh fires.
+    fx.write("a.txt", "new line\n");
+    fx.write("b.txt", "brand new\n");
+    app.refresh();
+    let out = frame(&app, 80, 14);
+    assert!(
+        out.contains("new line") && !out.contains("old line"),
+        "the open preview reflects the edit after refresh:\n{out}"
+    );
+    assert!(
+        out.contains("b.txt"),
+        "the newly created file appears in the Repo tree:\n{out}"
+    );
+}
+
 // ---- M7: search, help, theme ----
 
 #[test]

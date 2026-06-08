@@ -422,20 +422,24 @@ impl Browser {
             return;
         }
         self.content.reset();
+        // Highlights are computed off-thread (see `highlight_target`); the preview
+        // renders plain until they land, so selecting a file never blocks.
+        self.loaded = Some(Self::read_preview(row.path));
+    }
 
-        // Don't read huge files into memory for a preview.
-        if std::fs::metadata(&row.path).map(|m| m.len()).unwrap_or(0) > MAX_PREVIEW_BYTES {
-            self.loaded = Some(Loaded {
-                path: row.path,
+    /// Re-read a preview from disk (size-capped; binary-aware). Highlights start
+    /// empty and are filled off-thread.
+    fn read_preview(path: PathBuf) -> Loaded {
+        if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > MAX_PREVIEW_BYTES {
+            return Loaded {
+                path,
                 lines: Vec::new(),
                 highlights: Vec::new(),
                 binary: false,
                 too_large: true,
-            });
-            return;
+            };
         }
-
-        let loaded = match std::fs::read(&row.path) {
+        match std::fs::read(&path) {
             Ok(bytes) => {
                 let binary = bytes.contains(&0) || std::str::from_utf8(&bytes).is_err();
                 let lines = if binary {
@@ -447,7 +451,7 @@ impl Browser {
                         .collect()
                 };
                 Loaded {
-                    path: row.path,
+                    path,
                     lines,
                     highlights: Vec::new(),
                     binary,
@@ -455,15 +459,29 @@ impl Browser {
                 }
             }
             Err(_) => Loaded {
-                path: row.path,
+                path,
                 lines: Vec::new(),
                 highlights: Vec::new(),
                 binary: false,
                 too_large: false,
             },
-        };
-        // Highlights are computed off-thread (see `highlight_target`); the preview
-        // renders plain until they land, so selecting a file never blocks.
-        self.loaded = Some(loaded);
+        }
+    }
+
+    /// Re-read the tree and the open preview from disk, preserving the cursor —
+    /// so the Repo tab tracks live working-tree changes like the diff does.
+    pub fn reload(&mut self) {
+        self.invalidate(); // the tree rebuilds lazily on the next `rows()`
+        let len = self.rows_len();
+        if len > 0 && self.tree.cursor() >= len {
+            self.tree.set_cursor(len - 1);
+        }
+        if let Some(path) = self.loaded.as_ref().map(|l| l.path.clone()) {
+            self.loaded = Some(Self::read_preview(path));
+            let last = self.content_last_line();
+            if self.content.cursor() > last {
+                self.content.set_cursor(last);
+            }
+        }
     }
 }

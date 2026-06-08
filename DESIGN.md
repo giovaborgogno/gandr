@@ -98,7 +98,9 @@ Mouse: wheel scroll + click to select a file.
 
 - **Watch / auto-refresh** (notify + debounce): enabled for working-tree comparisons;
   disabled for static comparisons (ranges, single commits, PRs). On refresh it preserves
-  scroll position and the selected file. A subtle "updated" flash signals a refresh.
+  scroll position and the selected file, and re-reads the Repo tab too (its tree and the
+  open preview), so both tabs track an agent's edits live. A subtle "updated" flash signals
+  a refresh.
 - **Review state**: persisted in `.git/gandr/state.json`, keyed by comparison spec.
   When a reviewed file changes (e.g. the agent edits it again), keep the `✓` **and** show
   a `⚠ changed since reviewed` badge — never silently lose progress, never hide new changes.
