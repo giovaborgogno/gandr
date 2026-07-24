@@ -29,6 +29,7 @@ fn file_diff(path: &str, text: &str) -> FileDiff {
         }],
         old_text: String::new(),
         new_text: text.into(),
+        image: None,
     }
 }
 

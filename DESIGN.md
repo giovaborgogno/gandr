@@ -64,7 +64,14 @@ uncommitted diff.
 - Old + new line-number gutters (toggleable). Hunk bar `▎` on the left edge.
 - **Unified** and **side-by-side** views (`s`). In side-by-side, long lines **wrap**.
 - Collapsible context: show `context_lines` around changes, with an "expand context" affordance.
-- Binary / image files render a placeholder ("binary file, N bytes").
+- **Image files render inline** (PNG/JPG/GIF/WebP/BMP; SVG behind a feature flag) — in
+  the diff viewer (a changed image) and the Repo browser (any image file). Rendering uses
+  the terminal's best available graphics protocol (Kitty → iTerm2 → Sixel) with a Unicode
+  half-block fallback that works everywhere, via `ratatui-image` (see ADR 0008). Decoding
+  runs off the render thread; the resize to the pane is cached per area (so it happens once
+  per selection/terminal-resize, not per frame).
+- Other binary files (and images when disabled, undetectable, or over the size cap) render
+  a placeholder ("binary file, N bytes").
 
 ## 5. Navigation — **hybrid** focus model
 
@@ -140,6 +147,7 @@ tab_width     = 4
 theme         = "auto"
 editor_cmd    = "code -g {file}:{line}"   # {file} {line} placeholders
 base_branches = ["main", "master", "develop"]
+images        = true             # inline image preview; false forces the byte-count placeholder
 # [colors] and [keys] tables override diff palette and keybindings
 ```
 

@@ -12,6 +12,24 @@ use std::rc::Rc;
 /// Don't read files larger than this into the content preview.
 const MAX_PREVIEW_BYTES: u64 = 2_000_000;
 
+/// How much of an image file to read on the UI thread to probe its dimensions.
+/// Format headers (PNG/JPEG/GIF/WebP/BMP) carry the dimensions well within this,
+/// so we never pull a multi-MB image onto the UI thread just to size it.
+const IMAGE_HEADER_BYTES: u64 = 64 * 1024;
+
+/// Read up to `n` bytes from the start of `path` (the file header). `None` on an
+/// I/O error.
+fn read_prefix(path: &Path, n: u64) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(n)
+        .read_to_end(&mut buf)
+        .ok()?;
+    Some(buf)
+}
+
 /// Rows from the top to park the preview cursor after a search/reveal jump.
 const JUMP_MARGIN: usize = 3;
 
@@ -46,6 +64,10 @@ pub struct Loaded {
     pub highlights: Vec<Vec<FgSpan>>,
     pub binary: bool,
     pub too_large: bool,
+    /// Raster-image metadata (M15) when this is a previewable binary image,
+    /// probed from the file's bytes. `None` otherwise. Feeds the preview
+    /// placeholder now and the rendered image (M15b).
+    pub image: Option<crate::image_preview::ImageInfo>,
 }
 
 /// File-browser state for the Files tab.
@@ -430,13 +452,38 @@ impl Browser {
     /// Re-read a preview from disk (size-capped; binary-aware). Highlights start
     /// empty and are filled off-thread.
     fn read_preview(path: PathBuf) -> Loaded {
-        if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > MAX_PREVIEW_BYTES {
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+        // Image files: previewed up to the (larger) image cap, matching the diff
+        // viewer — but read only the header here (this runs per cursor move; we
+        // must not pull multiple MB onto the UI thread while scrolling). The full
+        // decode happens off-thread when the selection settles.
+        if crate::image_preview::is_image_path(&path) {
+            let too_large = size > crate::image_preview::MAX_IMAGE_BYTES as u64;
+            let image = if too_large {
+                None
+            } else {
+                read_prefix(&path, IMAGE_HEADER_BYTES)
+                    .and_then(|header| crate::image_preview::probe(&header))
+            };
+            return Loaded {
+                path,
+                lines: Vec::new(),
+                highlights: Vec::new(),
+                binary: true,
+                too_large,
+                image,
+            };
+        }
+
+        if size > MAX_PREVIEW_BYTES {
             return Loaded {
                 path,
                 lines: Vec::new(),
                 highlights: Vec::new(),
                 binary: false,
                 too_large: true,
+                image: None,
             };
         }
         match std::fs::read(&path) {
@@ -456,6 +503,7 @@ impl Browser {
                     highlights: Vec::new(),
                     binary,
                     too_large: false,
+                    image: None,
                 }
             }
             Err(_) => Loaded {
@@ -464,6 +512,7 @@ impl Browser {
                 highlights: Vec::new(),
                 binary: false,
                 too_large: false,
+                image: None,
             },
         }
     }

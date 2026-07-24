@@ -710,13 +710,19 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
     f.render_widget(file_header_line(app, file), file_header);
     app.set_viewport(diff_body.height as usize);
 
-    // Binary or very large files have no inline text diff.
+    // Binary or very large files have no inline text diff. Image files render
+    // inline when possible (M15b); until the decode lands (or if it fails) we
+    // show the metadata placeholder (M15a).
     if file.change.is_binary {
+        if app.render_image(f, diff_body) {
+            return;
+        }
+        let text = match &file.image {
+            Some(info) => format!("Image · {}", info.summary()),
+            None => "No text diff (binary or very large file).".to_string(),
+        };
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "No text diff (binary or very large file).",
-                Style::default().fg(Color::DarkGray),
-            )),
+            Paragraph::new(Span::styled(text, Style::default().fg(Color::DarkGray))),
             diff_body,
         );
         return;

@@ -17,7 +17,13 @@ use crate::ui::tree::{self, Row, RowKind};
 use crate::ui::viewport::Viewport;
 use anyhow::{Context as _, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::layout::{Rect, Size};
 use ratatui::{DefaultTerminal, Frame};
+// The compare-picker overlay below is also named `Picker`; alias the
+// ratatui-image one (terminal graphics protocol detection) to avoid the clash.
+use ratatui_image::picker::Picker as ImagePicker;
+use ratatui_image::protocol::Protocol;
+use ratatui_image::{Image, Resize};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -166,6 +172,32 @@ pub struct App {
     browser: Browser,
     /// Whether the help overlay is shown.
     show_help: bool,
+    /// Terminal graphics-protocol picker (M15b): detected once at startup
+    /// (`from_query_stdio`), or half-blocks by default (also what tests use, so
+    /// the rendered image is deterministic and shows up in snapshots).
+    image_picker: ImagePicker,
+    /// Whether inline image rendering is on (config `images`); `false` keeps the
+    /// metadata placeholder.
+    images_enabled: bool,
+    /// LRU cache of decoded+encoded image previews (M15b), keyed by (file, pane
+    /// area). Small — only a handful of recently-viewed images — so scrolling
+    /// back over an image re-shows it instantly instead of re-decoding. An entry
+    /// with `None` records a decode that *failed*, so we don't retry it in a loop.
+    /// `RefCell` because `render` is `&self` (mirroring the tree/display caches).
+    image_cache: RefCell<Vec<(jobs::ImageKey, Size, Option<Protocol>)>>,
+    /// Whether the current selection has "settled" enough to transmit its image
+    /// to the terminal. Cleared when the previewed image changes (scrolling),
+    /// set after a short quiet period — so a held j/k never transmits a full
+    /// image per step (the expensive part), only once you stop.
+    image_settled: Cell<bool>,
+    /// The pane area the last render wants an image encoded for. Recorded during
+    /// `render` (the only place the layout is known) and read by the decode job
+    /// so it encodes to the right size.
+    image_wanted_area: Cell<Option<Size>>,
+    /// The (image, area) a decode job is in flight for (at most one — avoids
+    /// respawning and CPU pile-up), and a monotonic token so stale results drop.
+    image_requested: Option<(jobs::ImageKey, Size)>,
+    image_epoch: u64,
     /// In-diff text search state (open when `Some`).
     search: Option<Search>,
     /// The fuzzy ref-picker overlay, when open.
@@ -241,6 +273,10 @@ struct DisplayRows {
     rows: Rc<Vec<DiffRow>>,
 }
 
+/// How many decoded image previews to keep cached (LRU). Small — just enough
+/// that scrolling back and forth over a few images is instant.
+const IMAGE_CACHE_CAP: usize = 8;
+
 /// In-diff search: the query and the current match's row offset.
 pub struct Search {
     pub query: String,
@@ -267,6 +303,7 @@ impl App {
         let review_path = ReviewState::state_path(&context.git_dir);
         let review = ReviewState::load(&review_path);
         let auto_refresh = config.auto_refresh;
+        let images_enabled = config.images;
         let browser = Browser::new(context.root.clone());
 
         let mut app = Self {
@@ -312,6 +349,13 @@ impl App {
             browser_query: None,
             browser,
             show_help: false,
+            image_picker: ImagePicker::halfblocks(),
+            images_enabled,
+            image_cache: RefCell::new(Vec::new()),
+            image_settled: Cell::new(true),
+            image_wanted_area: Cell::new(None),
+            image_requested: None,
+            image_epoch: 0,
             search: None,
             ref_picker: None,
             repo_search: None,
@@ -626,6 +670,207 @@ impl App {
         if epoch == self.browser_hl_epoch {
             self.browser.apply_highlights(&path, spans);
         }
+    }
+
+    /// Install the terminal-detected graphics picker (called once at startup,
+    /// after `from_query_stdio` succeeds). Until then the half-block picker set
+    /// in the constructor is used.
+    pub fn set_picker(&mut self, picker: ImagePicker) {
+        self.image_picker = picker;
+    }
+
+    /// The key of the image that *should* be shown right now (the selected binary
+    /// image in the Diff viewer, or the open binary image in the Repo browser),
+    /// or `None` when images are off or nothing image-like is selected. Gated on
+    /// the M15a metadata probe so we only try to decode confirmed images.
+    pub fn image_key(&self) -> Option<jobs::ImageKey> {
+        if !self.images_enabled {
+            return None;
+        }
+        match self.tab {
+            Tab::Diff => {
+                let file = self.current()?;
+                file.image?; // only files probed as decodable images
+                Some(jobs::ImageKey::Diff(file.change.path.clone()))
+            }
+            Tab::Files => {
+                let loaded = self.browser.loaded()?;
+                loaded.image?;
+                Some(jobs::ImageKey::File(loaded.path.clone()))
+            }
+        }
+    }
+
+    /// Where the decode job for `key` reads its bytes from.
+    fn image_source(&self, key: &jobs::ImageKey) -> Option<jobs::ImageSource> {
+        match key {
+            jobs::ImageKey::Diff(_) => Some(jobs::ImageSource::Diff {
+                root: self.context.root.clone(),
+                spec: self.spec.clone(),
+                change: self.current()?.change.clone(),
+            }),
+            jobs::ImageKey::File(path) => Some(jobs::ImageSource::File(path.clone())),
+        }
+    }
+
+    /// Whether `(key, area)` is already in the preview cache (decoded, or a
+    /// recorded decode failure). Read-only probe — doesn't reorder the LRU.
+    fn image_cached(&self, key: &jobs::ImageKey, area: Size) -> bool {
+        self.image_cache
+            .borrow()
+            .iter()
+            .any(|(k, a, _)| k == key && *a == area)
+    }
+
+    /// Insert a decoded (or failed: `None`) image at the front of the LRU cache,
+    /// dropping any prior entry for the same (key, area) and evicting past the cap.
+    fn cache_image(&self, key: jobs::ImageKey, area: Size, proto: Option<Protocol>) {
+        let mut cache = self.image_cache.borrow_mut();
+        cache.retain(|(k, a, _)| !(k == &key && *a == area));
+        cache.insert(0, (key, area, proto));
+        cache.truncate(IMAGE_CACHE_CAP);
+    }
+
+    /// A decode+encode job to spawn for the currently-shown image, if it isn't
+    /// already cached and none is in flight. Returns (epoch, key, source, picker
+    /// clone, area). Spawned eagerly as you scroll (off-thread, one at a time) so
+    /// the image is usually ready by the time the selection settles; the pane
+    /// area is only known once `render` has run (recorded in `image_wanted_area`).
+    pub fn take_pending_image(
+        &mut self,
+    ) -> Option<(u64, jobs::ImageKey, jobs::ImageSource, ImagePicker, Size)> {
+        // At most one decode in flight at a time — scrolling an image folder
+        // would else pile up ~35ms decodes and saturate the CPU.
+        if self.image_requested.is_some() {
+            return None;
+        }
+        let key = self.image_key()?;
+        let area = self.image_wanted_area.get()?;
+        if area.width == 0 || area.height == 0 || self.image_cached(&key, area) {
+            return None; // no area yet, or already decoded for this size
+        }
+        let source = self.image_source(&key)?;
+        self.image_requested = Some((key.clone(), area));
+        self.image_epoch = self.image_epoch.wrapping_add(1);
+        Some((
+            self.image_epoch,
+            key,
+            source,
+            self.image_picker.clone(),
+            area,
+        ))
+    }
+
+    /// Apply a finished decode+encode into the cache (a `None` proto records the
+    /// failure so we don't retry). Only the *tracked* job (matching epoch) frees
+    /// the in-flight slot: a stale result must leave `image_requested` alone,
+    /// because it belongs to a newer job that's still running. Freeing it here
+    /// would let the loop spawn yet another job while that newer one runs, and
+    /// since results and spawns alternate 1:1 every returning result would then
+    /// be one epoch stale forever — a decode livelock that pegs the CPU and never
+    /// caches anything (hit when `invalidate_image`, e.g. an auto-refresh, races
+    /// an in-flight decode). `spawn_image` always sends, so the tracked job's
+    /// epoch always matches on return and the slot never gets stuck.
+    pub fn apply_image_ready(
+        &mut self,
+        epoch: u64,
+        key: jobs::ImageKey,
+        area: Size,
+        proto: Option<Protocol>,
+    ) {
+        if epoch != self.image_epoch {
+            return; // superseded — leave the slot to the newer, still-running job
+        }
+        self.image_requested = None;
+        self.cache_image(key, area, proto);
+    }
+
+    /// Mark the current selection settled (called after a short quiet period): its
+    /// image may now be transmitted to the terminal.
+    pub fn settle_image(&self) {
+        self.image_settled.set(true);
+    }
+
+    /// Whether we're on an image whose preview hasn't been transmitted yet — the
+    /// event loop arms its debounce timeout while this holds.
+    pub fn image_awaiting_settle(&self) -> bool {
+        !self.image_settled.get() && self.image_key().is_some()
+    }
+
+    /// Note that the previewed image may have changed (after handling input): if
+    /// so, un-settle so we don't transmit mid-scroll and re-arm the debounce.
+    pub fn note_selection_changed(&self, previous: &Option<jobs::ImageKey>) {
+        if self.image_key() != *previous {
+            self.image_settled.set(false);
+        }
+    }
+
+    /// Drop cached previews and any in-flight decode — used when content may have
+    /// changed under the same path (a diff refresh / browser reload).
+    fn invalidate_image(&mut self) {
+        self.image_cache.borrow_mut().clear();
+        self.image_requested = None;
+        self.image_epoch = self.image_epoch.wrapping_add(1);
+    }
+
+    /// Render the prepared image into `area`, returning `false` when there's
+    /// nothing to draw — images off, not an image, not settled yet (still
+    /// scrolling), not decoded yet, or the decode failed — so the caller shows the
+    /// metadata placeholder. Records the wanted area so the decode job sizes to it.
+    pub fn render_image(&self, f: &mut Frame, area: Rect) -> bool {
+        let Some(key) = self.image_key() else {
+            return false;
+        };
+        let size = Size::new(area.width, area.height);
+        self.image_wanted_area.set(Some(size));
+        // Don't transmit while scrolling — only once the selection has settled.
+        if !self.image_settled.get() {
+            return false;
+        }
+        let cache = self.image_cache.borrow();
+        let Some((_, _, Some(proto))) = cache.iter().find(|(k, a, _)| k == &key && *a == size)
+        else {
+            return false; // not decoded yet, or the decode failed
+        };
+        // Cheap: the protocol is already encoded for this area — this just
+        // re-emits the graphics escape (or half-block cells) into the buffer.
+        f.render_widget(Image::new(proto), area);
+        true
+    }
+
+    /// Synchronously fetch + decode + encode the currently-shown image for the
+    /// last rendered pane area, into the cache, on the calling thread. The live
+    /// app does this off-thread (see `take_pending_image`); this blocking path
+    /// exists for deterministic headless tests, which render once (to record the
+    /// area), call this, then render again to see the image.
+    pub fn load_current_image_blocking(&mut self) {
+        let Some(key) = self.image_key() else {
+            return;
+        };
+        let Some(area) = self.image_wanted_area.get() else {
+            return; // no render has happened yet — nothing to size to
+        };
+        let bytes = match &key {
+            jobs::ImageKey::Diff(_) => {
+                let Some(change) = self.current().map(|f| f.change.clone()) else {
+                    return;
+                };
+                self.backend
+                    .file_contents(&self.spec, &change)
+                    .ok()
+                    .and_then(|(old, new)| new.or(old))
+            }
+            jobs::ImageKey::File(path) => std::fs::read(path).ok(),
+        };
+        let proto = bytes
+            .as_deref()
+            .and_then(crate::image_preview::decode)
+            .and_then(|img| {
+                self.image_picker
+                    .new_protocol(img, area, Resize::Fit(None))
+                    .ok()
+            });
+        self.cache_image(key, area, proto);
     }
 
     /// Apply a finished highlight job, ignoring stale results (a newer selection
@@ -1022,6 +1267,8 @@ impl App {
         // and let the preview re-highlight (the request is deduped by path).
         self.browser.reload();
         self.browser_hl_requested = None;
+        // Content may have changed under the same path — re-decode the preview.
+        self.invalidate_image();
         if let Some(idx) =
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
         {
@@ -2283,6 +2530,13 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     };
     app.set_theme_mode(mode);
 
+    // Detect the terminal's graphics protocol + font size (M15b) — like the theme
+    // probe, this queries the terminal and must run before raw mode / alt-screen.
+    // On failure we keep the half-block picker (works everywhere).
+    if let Ok(picker) = ImagePicker::from_query_stdio() {
+        app.set_picker(picker);
+    }
+
     let root = app.context().root.clone();
 
     // One channel the UI loop blocks on: terminal input + job results + file changes.
@@ -2317,6 +2571,12 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     drop(watch); // stop watching
     result
 }
+
+/// How long the selection must be quiet before an image preview is decoded and
+/// transmitted (see the debounce in [`run_loop`]). Kept just above a typical
+/// fast key-repeat interval (~30–60ms) so a held j/k never triggers a per-step
+/// transmit, but short enough that the image feels immediate once you stop.
+const IMAGE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(70);
 
 fn run_loop(
     app: &mut App,
@@ -2361,45 +2621,86 @@ fn run_loop(
         if let Some((epoch, path, lines, mode)) = app.take_pending_browser_highlight() {
             jobs::spawn_file_highlight(tx.clone(), epoch, path, lines, mode);
         }
+        // Decode + encode the selected image off-thread, *eagerly* (one at a time)
+        // — so it's usually cached by the time the selection settles. It isn't
+        // transmitted to the terminal until settled (see below), so decoding
+        // while scrolling doesn't stutter; only the transmit is debounced.
+        if let Some((epoch, key, source, picker, area)) = app.take_pending_image() {
+            jobs::spawn_image(tx.clone(), epoch, key, source, picker, area);
+        }
 
-        match rx.recv() {
-            Ok(jobs::AppEvent::Term(Event::Key(key))) => {
+        // Block for the next event. While sitting on an image whose preview hasn't
+        // been transmitted yet, block only briefly: when that wait times out (no
+        // input for `IMAGE_DEBOUNCE`) the selection has *settled* and we allow the
+        // image to be drawn. This debounces the transmit — otherwise every cursor
+        // step over an image folder sends a full image to the terminal (a multi-MB
+        // graphics escape at full-screen with Kitty/iTerm2/Sixel that the terminal
+        // must render), which stutters. Non-image previews never arm the timeout.
+        use crossbeam_channel::RecvTimeoutError;
+        let recv = if app.image_awaiting_settle() {
+            rx.recv_timeout(IMAGE_DEBOUNCE)
+        } else {
+            rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        };
+        let event = match recv {
+            Ok(ev) => ev,
+            Err(RecvTimeoutError::Timeout) => {
+                app.settle_image(); // input went quiet → draw the (likely cached) image
+                dirty = true;
+                continue;
+            }
+            // The input thread holds a sender for the whole run, so recv only
+            // errors at shutdown; the loop normally exits via `should_quit`.
+            // Detached worker/input threads are abandoned when main returns.
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        match event {
+            jobs::AppEvent::Term(Event::Key(key)) => {
+                // Un-settle if this keypress moves to a different previewed image,
+                // so we don't transmit mid-scroll (and re-arm the debounce).
+                let prev_image = app.image_key();
                 app.handle_key(key);
+                app.note_selection_changed(&prev_image);
                 dirty = true;
             }
-            Ok(jobs::AppEvent::Term(Event::Resize(_, _))) => dirty = true,
-            Ok(jobs::AppEvent::Term(_)) => {}
-            Ok(jobs::AppEvent::FileChanged) => {
+            jobs::AppEvent::Term(Event::Resize(_, _)) => dirty = true,
+            jobs::AppEvent::Term(_) => {}
+            jobs::AppEvent::FileChanged => {
                 if app.is_watching() {
                     app.request_refresh();
                 }
             }
-            Ok(jobs::AppEvent::DiffReady { epoch, files }) => {
+            jobs::AppEvent::DiffReady { epoch, files } => {
                 app.apply_diff_result(epoch, files);
                 dirty = true;
             }
-            Ok(jobs::AppEvent::SearchReady { epoch, results }) => {
+            jobs::AppEvent::SearchReady { epoch, results } => {
                 app.apply_search_result(epoch, results);
                 dirty = true;
             }
-            Ok(jobs::AppEvent::HighlightReady {
+            jobs::AppEvent::HighlightReady {
                 epoch,
                 path,
                 mode,
                 old,
                 new,
-            }) => {
+            } => {
                 app.apply_highlight(epoch, path, mode, old, new);
                 dirty = true;
             }
-            Ok(jobs::AppEvent::BrowserHighlightReady { epoch, path, spans }) => {
+            jobs::AppEvent::BrowserHighlightReady { epoch, path, spans } => {
                 app.apply_browser_highlight(epoch, path, spans);
                 dirty = true;
             }
-            // The input thread holds a sender for the whole run, so recv only
-            // errors at shutdown; the loop normally exits via `should_quit`.
-            // Detached worker/input threads are abandoned when main returns.
-            Err(_) => break,
+            jobs::AppEvent::ImageReady {
+                epoch,
+                key,
+                area,
+                proto,
+            } => {
+                app.apply_image_ready(epoch, key, area, proto);
+                dirty = true;
+            }
         }
 
         // Emit a queued clipboard copy via OSC 52 — an invisible escape that sets

@@ -116,7 +116,14 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
         return;
     }
     if loaded.binary {
-        f.render_widget(Paragraph::new("Binary file."), inner);
+        if app.render_image(f, inner) {
+            return;
+        }
+        let text = match &loaded.image {
+            Some(info) => format!("Image · {}", info.summary()),
+            None => "Binary file.".to_string(),
+        };
+        f.render_widget(Paragraph::new(text), inner);
         return;
     }
 

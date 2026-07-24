@@ -10,15 +10,41 @@
 use crate::diff::engine;
 use crate::diff::FileDiff;
 use crate::git::git2_backend::Git2Backend;
-use crate::git::CompareSpec;
+use crate::git::{CompareSpec, FileChange, GitBackend};
 use crate::highlight::{FgSpan, Highlighter, ThemeMode};
 use crate::search::{self, SearchMode, SearchResults};
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use crossterm::event::Event as TermEvent;
+use ratatui::layout::Size;
+use ratatui_image::picker::Picker as ImagePicker;
+use ratatui_image::protocol::Protocol;
+use ratatui_image::Resize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// Identifies the image currently targeted for preview, so a decode result can
+/// be matched to the still-selected file (a stale result is dropped). The two
+/// consumers — the Diff viewer and the Repo browser — are distinct even for the
+/// same path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageKey {
+    Diff(PathBuf),
+    File(PathBuf),
+}
+
+/// Where a decode job reads its bytes from. The Diff side re-fetches the blob
+/// via the backend (opened fresh on the worker thread, like [`spawn_diff`],
+/// since `git2::Repository` isn't `Send`); the Files side reads from disk.
+pub enum ImageSource {
+    Diff {
+        root: PathBuf,
+        spec: CompareSpec,
+        change: FileChange,
+    },
+    File(PathBuf),
+}
 
 /// Everything the UI loop reacts to, on one channel.
 pub enum AppEvent {
@@ -48,6 +74,18 @@ pub enum AppEvent {
         epoch: u64,
         path: PathBuf,
         spans: Vec<Vec<FgSpan>>,
+    },
+    /// A background image decode+encode finished (M15b). `proto` is `None` if the
+    /// bytes couldn't be read/decoded. Tagged with the requesting epoch so a
+    /// stale result (the selection moved on) is dropped, and with the cell `area`
+    /// it was encoded for so a terminal resize re-encodes. Both the decode and
+    /// the (pane-sized) resize+encode run here, off the render thread — rendering
+    /// then just re-emits the ready protocol, which is cheap.
+    ImageReady {
+        epoch: u64,
+        key: ImageKey,
+        area: Size,
+        proto: Option<Protocol>,
     },
 }
 
@@ -139,6 +177,40 @@ pub fn spawn_highlight(
             mode,
             old,
             new,
+        });
+    });
+}
+
+/// Decode *and* encode the targeted image off-thread — both the O(pixels) decode
+/// and the pane-sized resize+encode (the latter is ~20ms full-screen, enough to
+/// drop frames if done inline while scrolling). Posts a ready-to-render
+/// [`Protocol`] tagged with `epoch` and the `area` it was sized for. `picker` is
+/// a cheap clone of the detected protocol/font-size.
+pub fn spawn_image(
+    tx: Sender<AppEvent>,
+    epoch: u64,
+    key: ImageKey,
+    source: ImageSource,
+    picker: ImagePicker,
+    area: Size,
+) {
+    std::thread::spawn(move || {
+        let bytes = match source {
+            ImageSource::Diff { root, spec, change } => Git2Backend::open(&root)
+                .and_then(|backend| backend.file_contents(&spec, &change))
+                .ok()
+                .and_then(|(old, new)| new.or(old)),
+            ImageSource::File(path) => std::fs::read(&path).ok(),
+        };
+        let proto = bytes
+            .as_deref()
+            .and_then(crate::image_preview::decode)
+            .and_then(|img| picker.new_protocol(img, area, Resize::Fit(None)).ok());
+        let _ = tx.send(AppEvent::ImageReady {
+            epoch,
+            key,
+            area,
+            proto,
         });
     });
 }

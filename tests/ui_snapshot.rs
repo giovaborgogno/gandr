@@ -87,6 +87,168 @@ fn unified_single_file_modify() {
     insta::assert_snapshot!(frame(&app, 80, 14));
 }
 
+/// A PNG of the given size with a vertical gradient, encoded in memory. The
+/// gradient makes adjacent pixel rows differ, so the half-block renderer emits
+/// actual `▀`/`▄` glyphs (a solid color would collapse to blank colored cells).
+fn encode_png(w: u32, h: u32) -> Vec<u8> {
+    use std::io::Cursor;
+    let img = image::RgbaImage::from_fn(w, h, |_x, y| {
+        let v = (y * 255 / h.max(1)) as u8;
+        image::Rgba([v, 200u8.saturating_sub(v), 80, 255])
+    });
+    let mut buf = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .expect("encode png");
+    buf.into_inner()
+}
+
+// M15a: an image file (a binary blob) shows its format + dimensions in the diff
+// viewer instead of the generic "no text diff" placeholder.
+#[test]
+fn diff_shows_image_metadata_for_binary_image() {
+    let fx = Fixture::new();
+    fx.write("README.md", "hi\n");
+    fx.commit("init");
+    fx.write_bytes("logo.png", &encode_png(4, 3)); // uncommitted add
+    let app = app_from(&fx);
+    let out = frame(&app, 80, 12);
+    assert!(out.contains("Image · PNG · 4×3"), "frame:\n{out}");
+}
+
+// M15a: the same metadata shows in the Repo browser's preview pane.
+#[test]
+fn repo_browser_shows_image_metadata() {
+    let fx = Fixture::new();
+    fx.write_bytes("logo.png", &encode_png(6, 5));
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Files tab; cursor on logo.png (the only file)
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty())); // open its content pane
+    let out = frame(&app, 80, 12);
+    assert!(out.contains("Image · PNG · 6×5"), "frame:\n{out}");
+}
+
+// M15b: once decoded, the diff viewer renders the image itself. Tests use the
+// half-block picker (the default), which draws into the buffer as `▀` cells —
+// so the rendered image is visible in a headless frame. In the live app the
+// decode+encode is async (event loop); here we render once (to record the pane
+// area), run it synchronously, then render again to see the image.
+#[test]
+fn diff_renders_decoded_image_as_halfblocks() {
+    let fx = Fixture::new();
+    fx.write("README.md", "hi\n");
+    fx.commit("init");
+    fx.write_bytes("logo.png", &encode_png(60, 40)); // uncommitted add
+    let mut app = app_from(&fx);
+    frame(&app, 80, 12); // records the preview pane area
+    app.load_current_image_blocking();
+    let out = frame(&app, 80, 12);
+    assert!(
+        out.contains('▀'),
+        "expected a half-block image, got:\n{out}"
+    );
+    assert!(
+        !out.contains("Image · PNG"),
+        "image should replace the metadata placeholder:\n{out}"
+    );
+}
+
+// M15b: the Repo browser renders the decoded image too.
+#[test]
+fn repo_browser_renders_decoded_image_as_halfblocks() {
+    let fx = Fixture::new();
+    fx.write_bytes("logo.png", &encode_png(60, 40));
+    fx.commit("init");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2'));
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()));
+    frame(&app, 80, 12); // records the preview pane area
+    app.load_current_image_blocking();
+    let out = frame(&app, 80, 12);
+    assert!(
+        out.contains('▀'),
+        "expected a half-block image, got:\n{out}"
+    );
+}
+
+// M15c regression: a *stale* decode result must not free the single-in-flight
+// slot — else a refresh mid-decode spawns a replacement while the current job
+// still runs, and results/spawns alternate 1:1 forever (a decode livelock that
+// pegs the CPU and never caches). Only the tracked (matching-epoch) job frees it.
+#[test]
+fn stale_image_result_does_not_free_inflight_slot() {
+    let fx = Fixture::new();
+    fx.write("README.md", "hi\n");
+    fx.commit("init");
+    fx.write_bytes("logo.png", &encode_png(60, 40));
+    let mut app = app_from(&fx);
+    frame(&app, 80, 12); // record the pane area so a decode can be requested
+
+    let (epoch, key, _src, _picker, area) = app
+        .take_pending_image()
+        .expect("an image decode should be pending");
+    // A stale result (older epoch — e.g. one orphaned by an invalidate) arrives:
+    app.apply_image_ready(epoch.wrapping_sub(1), key.clone(), area, None);
+    assert!(
+        app.take_pending_image().is_none(),
+        "stale result must leave the in-flight slot held — no duplicate decode"
+    );
+    // The tracked result frees the slot (and caches the failure, so no retry):
+    app.apply_image_ready(epoch, key, area, None);
+    assert!(
+        app.take_pending_image().is_none(),
+        "after the tracked result the failure is cached, so no respawn"
+    );
+}
+
+// M15c: the debounce gate — an unsettled selection (mid-scroll) shows the
+// placeholder even with the image decoded; settling transmits it. Uses the same
+// gate the event loop drives (`note_selection_changed` / `settle_image`).
+#[test]
+fn unsettled_selection_hides_image_until_settled() {
+    let fx = Fixture::new();
+    fx.write("README.md", "hi\n");
+    fx.commit("init");
+    fx.write_bytes("logo.png", &encode_png(60, 40));
+    let mut app = app_from(&fx);
+    frame(&app, 80, 12); // record the pane area
+    app.load_current_image_blocking(); // decode into the cache
+    assert!(frame(&app, 80, 12).contains('▀'), "settled → image shows");
+
+    app.note_selection_changed(&None); // selection "changed" → un-settle (scrolling)
+    assert!(
+        !frame(&app, 80, 12).contains('▀'),
+        "unsettled → placeholder, no transmit while scrolling"
+    );
+
+    app.settle_image(); // quiet period elapsed
+    assert!(
+        frame(&app, 80, 12).contains('▀'),
+        "settled again → image transmitted (served from cache, no re-decode)"
+    );
+}
+
+// M15b: `images = false` keeps the metadata placeholder even after a decode
+// would be possible.
+#[test]
+fn images_disabled_keeps_placeholder() {
+    let fx = Fixture::new();
+    fx.write("README.md", "hi\n");
+    fx.commit("init");
+    fx.write_bytes("logo.png", &encode_png(60, 40));
+    let backend = Box::new(Git2Backend::open(fx.path()).unwrap());
+    let config = Config {
+        images: false,
+        ..Config::default()
+    };
+    let mut app = App::new(config, backend, CompareSpec::Uncommitted).unwrap();
+    app.load_current_image_blocking(); // no-op when images are off
+    let out = frame(&app, 80, 12);
+    assert!(out.contains("Image · PNG · 60×40"), "frame:\n{out}");
+    assert!(!out.contains('▀'), "should not render the image:\n{out}");
+}
+
 #[test]
 fn multi_file_list_with_first_selected() {
     let fx = Fixture::new();

@@ -4,6 +4,7 @@
 //! [`Segment`]s; this module just defines the shapes the UI renders.
 
 use crate::git::FileChange;
+use crate::image_preview::ImageInfo;
 
 pub mod engine;
 pub mod fold;
@@ -59,4 +60,9 @@ pub struct FileDiff {
     /// [`engine::split_lines`] for the line indexing that matches `old_no`/`new_no`.
     pub old_text: String,
     pub new_text: String,
+    /// Raster-image metadata for a binary image file (M15), probed from the
+    /// current side's bytes while building the diff. `None` for non-images and
+    /// non-binary files. Feeds the preview placeholder now and the rendered
+    /// image (M15b).
+    pub image: Option<ImageInfo>,
 }

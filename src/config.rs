@@ -42,6 +42,9 @@ pub struct Config {
     /// Branches tried (in order) when detecting a base for smart comparison.
     pub base_branches: Vec<String>,
     pub theme: ThemeChoice,
+    /// Render image files inline (M15). `false` forces the byte-count/metadata
+    /// placeholder even where a graphics protocol is available.
+    pub images: bool,
 }
 
 impl Default for Config {
@@ -55,6 +58,7 @@ impl Default for Config {
             tab_width: 4,
             base_branches: vec!["main".into(), "master".into(), "develop".into()],
             theme: ThemeChoice::Auto,
+            images: true,
         }
     }
 }

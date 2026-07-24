@@ -25,6 +25,17 @@ git2 = "0.21"
 # Diff engine: line-level + word-level (the engine helix/gitoxide use)
 imara-diff = "0.2"
 
+# Image preview (M15): metadata probing now (format + dimensions); terminal
+# rendering (ratatui-image) lands in M15b. Codecs limited to the formats we
+# preview, to keep compile time down.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+] }
+
 # Syntax highlighting (delta-style), with embedded syntaxes/themes
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-default-fancy"] }
@@ -56,9 +67,20 @@ grep-searcher = "0.1"
 # never by the binary's real code path).
 tempfile = "3"
 
+# Inline image rendering (M15b, see ADR 0008): detects the terminal's graphics
+# protocol (Kitty/iTerm2/Sixel) with a Unicode half-block fallback. We disable
+# default features to avoid the chafa C dependency and the full `image` codec
+# set (`image-defaults`) — our own `image` dep above controls which codecs ship.
+ratatui-image = { version = "11.0.6", default-features = false, features = [
+    "crossterm",
+] }
+
 [dev-dependencies]
 # Snapshot testing of rendered TUI frames (see docs/testing.md)
 insta = "1"
+# Encode small PNGs in-memory for image-preview render tests (same version as
+# the normal dep — features unify, so no extra build).
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 opt-level = 3

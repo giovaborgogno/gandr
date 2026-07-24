@@ -19,6 +19,7 @@ fn file(path: &str) -> FileDiff {
         hunks: vec![],
         old_text: String::new(),
         new_text: String::new(),
+        image: None,
     }
 }
 

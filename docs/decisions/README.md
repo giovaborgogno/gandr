@@ -9,3 +9,6 @@ consequences. Add a new numbered file to change a decision; don't edit history, 
 - [0003](0003-no-stdout-parsing.md) — no shelling-out-to-git stdout parsing for diffs
 - [0004](0004-theme-auto-detect.md) — `theme = "auto"` via terminal background (OSC 11)
 - [0005](0005-readonly-and-direct-commits.md) — read-only viewer; direct commits to main
+- [0006](0006-shared-core-and-perf-consolidation.md) — shared core + performance consolidation
+- [0007](0007-search-scopes-slash-and-finder.md) — search scopes: `/` in-view, `f`/`F` finder
+- [0008](0008-image-preview.md) — image preview via `ratatui-image` (protocol + halfblocks)

@@ -253,11 +253,20 @@ pub fn build_file_diff(
         change.is_binary = true;
         change.additions = 0;
         change.deletions = 0;
+        // Probe image metadata (format + dimensions) for a binary image file,
+        // from the current side (new; old for a deletion). Cheap (header only)
+        // and already off the UI thread — this runs inside `spawn_diff`.
+        let image = if crate::image_preview::is_image_path(&change.path) {
+            new.or(old).and_then(crate::image_preview::probe)
+        } else {
+            None
+        };
         return FileDiff {
             change,
             hunks: Vec::new(),
             old_text: String::new(),
             new_text: String::new(),
+            image,
         };
     }
 
@@ -285,6 +294,7 @@ pub fn build_file_diff(
         hunks,
         old_text: old_text.to_string(),
         new_text: new_text.to_string(),
+        image: None,
     }
 }
 

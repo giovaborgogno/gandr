@@ -172,6 +172,55 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       results list that jumps to file + line; `Tab` flips file-name ↔ content.
       Walk is sorted (deterministic) and capped at `search::MAX_RESULTS` (500).
 
+### M15 — Image preview (see ADR 0008)
+Inline image rendering in the diff viewer and the Repo browser, protocol-detected with a
+half-block fallback. Raster now; SVG behind a feature flag. Sub-tasks:
+
+- [x] **M15a — Plumbing + metadata.** New leaf module `src/image_preview.rs`:
+      `is_image_path` (extension), `probe` (format + dimensions from the header, no full
+      decode, bounded by `MAX_IMAGE_BYTES` = 16 MiB), and `ImageInfo`. Metadata is probed
+      where the raw bytes already exist — `build_file_diff` in the diff engine (which runs
+      inside `spawn_diff`, off the UI thread) attaches `FileDiff.image`, and the browser's
+      `read_preview` attaches `Loaded.image` — so no new async/cache machinery: the existing
+      `FileDiff`/`Loaded` caches carry it. Both placeholders (diff viewer + repo browser)
+      now show `Image · PNG · 800×600 · 42.1 KB`. Tests: `is_image_path`/`probe` unit tests
+      + two headless render tests (diff + browser). *(The on-demand async **decode** — the
+      expensive step — is deferred to M15b, where it's actually needed for rendering.)*
+- [x] **M15b — Raster render.** Both placeholder branches (`src/ui/mod.rs` diff viewer,
+      `src/ui/browser.rs` repo preview) now render the image via a `ratatui-image`
+      `StatefulImage`. `App` holds an `ImagePicker` (aliased to avoid the compare-`Picker`
+      clash) detected once at startup (`Picker::from_query_stdio`, sequenced after the
+      `termbg`/OSC 11 probe, before `try_init`), defaulting to `Picker::halfblocks()` —
+      which is also what tests use, so the rendered image (half-block `▀`/`▄` glyphs) is
+      deterministic and visible in a `TestBackend` frame. Config `images = false` forces the
+      placeholder. Verified headlessly: `diff_renders_decoded_image_as_halfblocks`,
+      `repo_browser_renders_decoded_image_as_halfblocks`, `images_disabled_keeps_placeholder`.
+- [x] **M15c — Performance & correctness.** Both the decode **and** the resize+encode run
+      off the render thread in `jobs::spawn_image` (encoding a static `Protocol` sized to the
+      pane the last `render` recorded); the render thread just re-emits the ready protocol
+      (~130µs full-screen, vs ~19ms when the encode was inline — measured on a 1600×1200
+      image). Stale results (selection moved, or the pane resized) are dropped by epoch/area;
+      a terminal resize re-spawns for the new size. **Perf model** (the stutter was
+      transmitting a full image to the terminal — a multi-MB Kitty/iTerm2/Sixel escape at
+      full-screen — on *every* cursor step over an image folder):
+      - **Decode eagerly, transmit debounced.** Decoding runs off-thread as you scroll (one
+        at a time — `image_requested` gate — so it never piles up), but the image is only
+        *transmitted* once the selection settles (`image_settled`, cleared when the previewed
+        image changes, set after `IMAGE_DEBOUNCE` = 70ms of quiet in `run_loop` via
+        `recv_timeout`). So scrolling never transmits per step; the image appears ~70ms after
+        you stop, usually already decoded.
+      - **LRU cache** (`IMAGE_CACHE_CAP` = 8, keyed by file + pane area) makes scrolling back
+        over a recent image instant (no re-decode); a cached `None` records a decode failure
+        so it isn't retried. Cleared on refresh (`invalidate_image`).
+      *Kitty leftover-deletion for the native graphics protocols is handled by `ratatui-image`
+      and verified on a real terminal — half-blocks (what snapshots cover) writes ordinary
+      cells and needs none.*
+- [ ] **M15d — SVG (feature-flagged).** Rasterize with `resvg`/`usvg`/`tiny-skia` at the
+      target resolution, then feed the M15b/c pipeline. Default-off Cargo feature (heavy
+      dependency tree / compile time). Fonts: bundle a minimal `fontdb` set or skip text.
+- [ ] **M15e — Modified images before/after (optional).** Reuse the side-by-side split
+      (M4) to show old vs. new for a changed image, not just the new one.
+
 ## Backlog / later (not v1)
 
 - ~~**Branch/ref picker**~~ — done in M9 (`b` opens a fuzzy picker over branches +
