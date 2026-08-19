@@ -520,9 +520,16 @@ impl Browser {
     /// Re-read the tree and the open preview from disk, preserving the cursor —
     /// so the Repo tab tracks live working-tree changes like the diff does.
     pub fn reload(&mut self) {
+        // Keep the cursor on the same entry: the rows are re-read from disk, so
+        // a file created or deleted *above* the cursor would otherwise slide a
+        // different row under it (the cursor is a row index, not a path).
+        let prev = self.row_at(self.tree.cursor()).map(|r| r.path);
         self.invalidate(); // the tree rebuilds lazily on the next `rows()`
+        let pos = prev.and_then(|p| self.rows().iter().position(|r| r.path == p));
         let len = self.rows_len();
-        if len > 0 && self.tree.cursor() >= len {
+        if let Some(pos) = pos {
+            self.tree.set_cursor(pos);
+        } else if len > 0 && self.tree.cursor() >= len {
             self.tree.set_cursor(len - 1);
         }
         if let Some(path) = self.loaded.as_ref().map(|l| l.path.clone()) {

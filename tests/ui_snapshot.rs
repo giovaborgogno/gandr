@@ -422,6 +422,59 @@ fn refresh_preserves_selected_file() {
 }
 
 #[test]
+fn refresh_keeps_the_tree_cursor_on_a_directory_row() {
+    // Sitting on a directory row (to collapse it, or just passing through while
+    // scrolling) must survive a background refresh — otherwise an agent editing
+    // files yanks the cursor back onto the selected file.
+    let fx = Fixture::new();
+    fx.write("src/a.txt", "a\n");
+    fx.write("src/b.txt", "b\n");
+    fx.commit("init");
+    fx.write("src/a.txt", "a1\n");
+    fx.write("src/b.txt", "b1\n");
+    let mut app = app_from(&fx);
+
+    // Rows are [dir src, a.txt, b.txt]; the cursor starts on the first file.
+    app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert!(
+        app.tree_rows()[app.tree_cursor()].file_index().is_none(),
+        "the cursor is on the directory row"
+    );
+
+    fx.write("src/a.txt", "a2\n"); // the agent edits a file → watcher refresh
+    app.refresh();
+    assert_eq!(app.tree_cursor(), 0);
+    assert!(
+        app.tree_rows()[app.tree_cursor()].file_index().is_none(),
+        "the cursor is still on the directory row after the refresh"
+    );
+}
+
+#[test]
+fn refresh_keeps_the_repo_cursor_on_the_same_entry() {
+    // The Repo tree re-reads from disk on every refresh; the cursor is a row
+    // index, so a file created above it used to slide a different row under it.
+    let fx = Fixture::new();
+    fx.write("a.txt", "a\n");
+    fx.write("m.txt", "m\n");
+    fx.commit("init");
+    fx.write("a.txt", "a1\n");
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Repo tab
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty())); // onto m.txt
+    let before = app.browser().rows()[app.browser().cursor()].name.clone();
+    assert_eq!(before, "m.txt");
+
+    fx.write("b.txt", "b\n"); // the agent creates a file sorting above the cursor
+    app.refresh();
+    assert_eq!(
+        app.browser().rows()[app.browser().cursor()].name,
+        "m.txt",
+        "the cursor stays on the same entry, not the row that took its index"
+    );
+}
+
+#[test]
 fn repo_preview_and_tree_update_on_refresh() {
     // A live refresh (what the file watcher drives) must also re-read the Repo
     // tab: the open preview's content and new files in the tree.

@@ -1159,6 +1159,21 @@ impl App {
         }
     }
 
+    /// Put the tree cursor back on directory row `path` after a rebuild.
+    /// Returns whether the row still exists (it doesn't if the directory's last
+    /// changed file went away, or if it was compacted into another row).
+    fn restore_dir_cursor(&mut self, path: Option<&Path>) -> bool {
+        let Some(path) = path else { return false };
+        let pos = self
+            .tree_rows()
+            .iter()
+            .position(|r| matches!(&r.kind, RowKind::Dir { path: p, .. } if p == path));
+        if let Some(pos) = pos {
+            self.tree_view.set_cursor(pos);
+        }
+        pos.is_some()
+    }
+
     fn clamp_cursor(&mut self) {
         let len = self.tree_rows().len();
         if len > 0 && self.tree_view.cursor() >= len {
@@ -1256,6 +1271,18 @@ impl App {
     fn apply_files(&mut self, files: Vec<FileDiff>) {
         let prev_path = self.current().map(|f| f.change.path.clone());
         let prev_cursor = self.diff_view.cursor();
+        // A directory row under the tree cursor has no file index to restore it
+        // by, so remember its path: a background refresh (files edited while the
+        // user browses the tree) must not yank the cursor off it and back onto
+        // the selected file's row.
+        let prev_dir = match self
+            .tree_rows()
+            .get(self.tree_view.cursor())
+            .map(|r| &r.kind)
+        {
+            Some(RowKind::Dir { path, .. }) => Some(path.clone()),
+            _ => None,
+        };
         self.files = files;
         self.error = None;
         // The file set (and thus old/new text) changed: drop per-file caches so a
@@ -1273,17 +1300,21 @@ impl App {
             prev_path.and_then(|p| self.files.iter().position(|f| f.change.path == p))
         {
             self.selected = idx;
-            if let Some(c) = self
-                .tree_rows()
-                .iter()
-                .position(|r| r.file_index() == Some(idx))
-            {
-                self.tree_view.set_cursor(c);
+            if !self.restore_dir_cursor(prev_dir.as_deref()) {
+                if let Some(c) = self
+                    .tree_rows()
+                    .iter()
+                    .position(|r| r.file_index() == Some(idx))
+                {
+                    self.tree_view.set_cursor(c);
+                }
             }
             // Keep the cursor where it was, clamped to the (possibly shorter) file.
             self.diff_view
                 .set_cursor(prev_cursor.min(self.last_diff_row()));
         } else {
+            // The selected file is gone: the file set really changed under us
+            // (a new comparison), so the full reset wins over the old cursor.
             self.reset_view();
         }
         self.recompute_review();
