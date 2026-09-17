@@ -117,6 +117,7 @@ Each milestone is independently runnable and ends in a commit. After each, run t
       (Uncommitted/Staged/WorkdirVs/Range/Commit).
 - [x] Base detection via merge-base (`detect_base`); `base::resolve` smart fallback chain.
 - [x] `--pr [N]` via `gh pr view` (tsv, title-last so tabs are safe); header shows PR title.
+- [x] PR comparisons start at the merge base, excluding unrelated changes on the base branch.
 - [x] CLI parsing (`<ref>`, `<ref>..<ref>`, `--staged`, `--pr`, `--smart`); Ctrl-C quits.
 - [x] Tests: cli parsing, all backend comparison kinds, detect_base, picker overlay snapshot.
 - Note: path scoping (`gandr <path>`) deferred (ref/path disambiguation) — see backlog.

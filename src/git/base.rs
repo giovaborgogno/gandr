@@ -30,7 +30,7 @@ pub fn resolve(
     base_branches: &[String],
 ) -> Result<Resolved> {
     if let CompareSpec::Pr(n) = requested {
-        return resolve_pr(n);
+        return resolve_pr(backend, n);
     }
 
     if smart {
@@ -46,7 +46,7 @@ pub fn resolve(
                         title: Some("branch vs base".to_string()),
                     });
                 }
-                if let Ok(pr) = resolve_pr(None) {
+                if let Ok(pr) = resolve_pr(backend, None) {
                     return Ok(pr);
                 }
             }
@@ -58,7 +58,7 @@ pub fn resolve(
 
 /// Resolve a PR (the current branch's if `number` is `None`) into a commit range
 /// via `gh pr view`. Requires `gh` on PATH and network access.
-pub fn resolve_pr(number: Option<u32>) -> Result<Resolved> {
+pub fn resolve_pr(backend: &dyn GitBackend, number: Option<u32>) -> Result<Resolved> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("view");
     if let Some(n) = number {
@@ -91,7 +91,7 @@ pub fn resolve_pr(number: Option<u32>) -> Result<Resolved> {
     };
 
     Ok(Resolved {
-        spec: CompareSpec::Range((*base).to_string(), (*head).to_string()),
+        spec: CompareSpec::Range(backend.merge_base(base, head)?, (*head).to_string()),
         title: Some(format!("PR #{num}: {title}")),
     })
 }

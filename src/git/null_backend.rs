@@ -41,6 +41,10 @@ impl GitBackend for NullBackend {
         Ok(None)
     }
 
+    fn merge_base(&self, _base: &str, _head: &str) -> Result<String> {
+        anyhow::bail!("cannot find merge base outside a git repository")
+    }
+
     fn list_refs(&self) -> Result<Vec<RefEntry>> {
         Ok(Vec::new())
     }

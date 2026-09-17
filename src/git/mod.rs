@@ -145,6 +145,8 @@ pub trait GitBackend {
     /// `None` if no suitable base is found.
     fn detect_base(&self, candidates: &[String]) -> Result<Option<String>>;
 
+    fn merge_base(&self, base: &str, head: &str) -> Result<String>;
+
     /// All branches (local + remote) and tags, for the compare-against picker.
     /// Order: local branches, then remote branches, then tags (each alpha).
     fn list_refs(&self) -> Result<Vec<RefEntry>>;
