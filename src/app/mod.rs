@@ -2175,7 +2175,7 @@ impl App {
         match item.action {
             PickerAction::Spec(spec) => self.set_spec(spec, None),
             PickerAction::RefSearch => self.open_ref_picker(),
-            PickerAction::Pr => match base::resolve_pr(None) {
+            PickerAction::Pr => match base::resolve_pr(self.backend.as_ref(), None) {
                 Ok(r) => self.set_spec(r.spec, r.title),
                 Err(e) => self.error = Some(e.to_string()),
             },

@@ -314,6 +314,16 @@ impl GitBackend for Git2Backend {
         Ok(None)
     }
 
+    fn merge_base(&self, base: &str, head: &str) -> Result<String> {
+        let base_commit = self.commit_of(base)?;
+        let head_commit = self.commit_of(head)?;
+        let merge_base = self
+            .repo
+            .merge_base(base_commit.id(), head_commit.id())
+            .with_context(|| format!("cannot find merge base between {base} and {head}"))?;
+        Ok(merge_base.to_string())
+    }
+
     fn list_refs(&self) -> Result<Vec<RefEntry>> {
         let mut local = Vec::new();
         let mut remote = Vec::new();
