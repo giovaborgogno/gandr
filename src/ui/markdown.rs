@@ -7,6 +7,8 @@
 //! (tables are sized by `tui-markdown` itself), nicer bullets / task boxes /
 //! rules, heading underlines, and fenced code blocks highlighted with our own
 //! syntect setup (so we don't pull `tui-markdown`'s oniguruma-based highlighter).
+//! ```mermaid blocks are drawn as Unicode box diagrams by `mermaid-text`
+//! (falling back to the highlighted source when a diagram can't be parsed).
 //!
 //! Everything here is render-pure: `source text + width + theme → Vec<Line>`.
 //! The app caches the result per (file, content, width, theme).
@@ -28,6 +30,14 @@ const FENCE: &str = "\u{E000}";
 /// at ~80ms for 160 KB in the dev profile; bigger files show a notice instead of
 /// freezing the UI. (Async rendering is a backlog follow-up.)
 pub const MAX_PREVIEW_BYTES: usize = 256 * 1024;
+
+/// Largest ```mermaid block (non-blank source lines) drawn as a diagram. Layout
+/// is superlinear (~0.2s at 100 nodes, ~1.5s at 200 in the dev profile) and runs
+/// on the UI thread on a cache miss; bigger diagrams show their source.
+const MAX_DIAGRAM_LINES: usize = 100;
+
+/// Narrowest code box (columns) a diagram is drawn in; below it, the source.
+const MIN_DIAGRAM_WIDTH: usize = 8;
 
 /// Spaces a tab expands to inside the preview (ratatui can't measure `\t`).
 const TAB: &str = "    ";
@@ -193,6 +203,8 @@ struct CodeBlock {
     prefix: Vec<Span<'static>>,
     prefix_text: String,
     hl: Option<Highlighter>,
+    /// A ```mermaid block: drawn as a diagram instead of highlighted source.
+    mermaid: bool,
     lines: Vec<String>,
 }
 
@@ -203,6 +215,10 @@ impl CodeBlock {
             prefix,
             prefix_text,
             hl: code_highlighter(info, mode),
+            mermaid: info
+                .split_whitespace()
+                .next()
+                .is_some_and(|l| l.eq_ignore_ascii_case("mermaid")),
             lines: Vec::new(),
         }
     }
@@ -222,11 +238,19 @@ impl CodeBlock {
         let base = styles.code();
         let pw = self.prefix_text.width();
         let inner = w.saturating_sub(pw).max(1);
+        let mut out = Vec::new();
+        if self.mermaid {
+            match self.diagram(styles, inner) {
+                Ok(rows) => return rows,
+                // Shown above the source it falls back to.
+                Err(Some(note)) => out.push(self.code_row(note, base.italic(), base, inner)),
+                Err(None) => {}
+            }
+        }
         let highlights = match &self.hl {
             Some(hl) => hl.highlight_file(&self.lines),
             None => Vec::new(),
         };
-        let mut out = Vec::new();
         for (i, text) in self.lines.iter().enumerate() {
             let mut spans = vec![Span::styled(" ", base)];
             let fg = highlights.get(i).filter(|f| !f.is_empty());
@@ -249,6 +273,74 @@ impl CodeBlock {
         }
         out
     }
+
+    /// Draw a ```mermaid block as a box diagram fitted to `inner` columns.
+    /// `Err` means "show the source instead", with an optional note: the diagram
+    /// is too large to lay out on the UI thread, or `mermaid-text` can't parse
+    /// it (or panicked on it). Rows are clipped (marked `…`), never wrapped:
+    /// wrapping would scramble the drawing, and the renderer already tries to
+    /// fit the width it's given.
+    fn diagram(&self, styles: Styles, inner: usize) -> Result<Vec<Line<'static>>, Option<String>> {
+        let base = styles.code();
+        if inner < MIN_DIAGRAM_WIDTH {
+            return Err(None);
+        }
+        let statements = self.lines.iter().filter(|l| !l.trim().is_empty()).count();
+        if statements > MAX_DIAGRAM_LINES {
+            return Err(Some(format!(
+                "Mermaid diagram too large to draw ({statements} lines > {MAX_DIAGRAM_LINES}); showing its source."
+            )));
+        }
+        let budget = inner - 1; // 1 col of left padding
+        let src = self.lines.join("\n");
+        let drawn =
+            crate::panic_guard::contain(|| mermaid_text::render_with_width(&src, Some(budget)))
+                .and_then(Result::ok)
+                .ok_or(None)?;
+        let mut out = vec![self.code_row(String::new(), base, base, inner)];
+        for text in drawn.lines() {
+            let row = if text.width() > budget {
+                let mut cut = clip(text, budget - 1);
+                cut.push('…');
+                cut
+            } else {
+                text.to_string()
+            };
+            out.push(self.code_row(row, base, base, inner));
+        }
+        out.push(self.code_row(String::new(), base, base, inner));
+        Ok(out)
+    }
+
+    /// One row of the code box: prefix, 1 col of padding, `text` (clipped) in
+    /// `style`, then `base` padding to `inner` columns.
+    fn code_row(&self, text: String, style: Style, base: Style, inner: usize) -> Line<'static> {
+        let budget = inner.saturating_sub(1);
+        let text = clip(&text, budget);
+        let pad = budget - text.width();
+        let mut row = self.prefix.clone();
+        row.push(Span::styled(" ", base));
+        row.push(Span::styled(text, style));
+        if pad > 0 {
+            row.push(Span::styled(" ".repeat(pad), base));
+        }
+        Line::from(row)
+    }
+}
+
+/// The longest prefix of `s` that fits in `max` display columns.
+fn clip(s: &str, max: usize) -> String {
+    let mut used = 0;
+    let mut out = String::new();
+    for c in s.chars() {
+        let cw = c.width().unwrap_or(0);
+        if used + cw > max {
+            break;
+        }
+        used += cw;
+        out.push(c);
+    }
+    out
 }
 
 /// Detach a borrowed `tui-markdown` line from the source text (and expand tabs).
@@ -567,5 +659,58 @@ mod tests {
         for l in &lines {
             assert!(l.width() <= 12, "too wide: {:?}", plain_text(l));
         }
+    }
+
+    #[test]
+    fn mermaid_block_draws_a_diagram() {
+        let src = "```mermaid\ngraph LR; A[Build] --> B[Test]\n```\n";
+        let lines = render(src, 40, ThemeMode::Dark);
+        let out = text_of(&lines);
+        let all = out.join("\n");
+        assert!(all.contains("│ Build │"), "{all}");
+        assert!(all.contains("│ Test │"), "{all}");
+        assert!(!all.contains("-->"), "source leaked: {all}");
+        // A padded box: every row exactly the pane width.
+        assert!(out.iter().all(|l| l.width() == 40), "{out:?}");
+    }
+
+    #[test]
+    fn mermaid_fits_narrow_panes_and_falls_back_on_bad_input() {
+        let src = "```mermaid\ngraph LR; A[A very long build label] --> B[An equally long test label] --> C[Deploy]\n```\n";
+        for w in [12u16, 30, 50] {
+            let out = text_of(&render(src, w, ThemeMode::Dark));
+            assert!(
+                out.iter().all(|l| l.width() == w as usize),
+                "w={w}: {out:?}"
+            );
+        }
+        // Not parseable as a diagram → the source is shown, highlighted as code.
+        let out = text_of(&render(
+            "```mermaid\nnot a diagram ][\n```\n",
+            24,
+            ThemeMode::Dark,
+        ));
+        assert_eq!(out, vec![" not a diagram ][       "]);
+    }
+
+    #[test]
+    fn oversized_mermaid_shows_its_source_with_a_note() {
+        let body: String = (0..=MAX_DIAGRAM_LINES)
+            .map(|i| format!("  N{i} --> N{}\n", i + 1))
+            .collect();
+        let src = format!("```mermaid\ngraph TD\n{body}```\n");
+        let out = text_of(&render(&src, 60, ThemeMode::Dark));
+        assert!(out[0].contains("too large to draw"), "{:?}", &out[..2]);
+        assert!(out[1].contains("graph TD"), "{:?}", &out[..2]);
+        assert!(out.iter().all(|l| l.width() == 60));
+    }
+
+    #[test]
+    fn clipped_diagram_rows_are_marked() {
+        // Far too wide to compact into 10 columns: rows get clipped with `…`.
+        let src = "```mermaid\ngraph LR; A[Alpha] --> B[Bravo] --> C[Charlie]\n```\n";
+        let out = text_of(&render(src, 10, ThemeMode::Dark));
+        assert!(out.iter().any(|l| l.contains('…')), "{out:?}");
+        assert!(out.iter().all(|l| l.width() == 10), "{out:?}");
     }
 }

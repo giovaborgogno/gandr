@@ -128,7 +128,7 @@ fn main() -> Result<()> {
         // M16: the rendered Markdown preview (`m`) of a changed README.
         fx.write(
             "README.md",
-            "# gandr\n\nA **read-only** TUI for reviewing `git` diffs — built for *AI agent* changes. See [the docs](https://example.com).\n\n## Features\n\n- delta-style rendering with word-level highlights\n- side-by-side view\n  - long lines wrap\n- [x] live watch\n- [ ] SVG preview\n\n> [!NOTE]\n> Read-only: gandr never touches your index.\n\n```rust\nfn main() {\n    let x = \"hello\";\n}\n```\n\n| key | action |\n|-----|--------|\n| `m` | toggle preview |\n\n---\n",
+            "# gandr\n\nA **read-only** TUI for reviewing `git` diffs — built for *AI agent* changes. See [the docs](https://example.com).\n\n## Features\n\n- delta-style rendering with word-level highlights\n- side-by-side view\n  - long lines wrap\n- [x] live watch\n- [ ] SVG preview\n\n> [!NOTE]\n> Read-only: gandr never touches your index.\n\n```rust\nfn main() {\n    let x = \"hello\";\n}\n```\n\n```mermaid\ngraph LR; A[agent edits] --> B[gandr review] --> C[commit]\n```\n\n| key | action |\n|-----|--------|\n| `m` | toggle preview |\n\n---\n",
         );
         let backend = Box::new(Git2Backend::open(fx.path())?);
         app = App::new(Config::default(), backend, CompareSpec::Uncommitted)?;

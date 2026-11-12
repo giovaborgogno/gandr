@@ -2742,6 +2742,7 @@ pub fn run(config: Config, inv: crate::cli::Invocation) -> Result<()> {
     }
 
     let mut terminal = ratatui::try_init()?;
+    crate::panic_guard::install_filter();
     let result = run_loop(&mut app, &mut terminal, &rx, &tx, &root, &input_paused);
     ratatui::restore();
     drop(watch); // stop watching
@@ -2926,6 +2927,7 @@ fn launch_editor(terminal: &mut DefaultTerminal, path: &std::path::Path, line: u
     }
     let _ = cmd.status(); // editor exit status is not actionable
     *terminal = ratatui::try_init()?;
+    crate::panic_guard::install_filter();
     terminal.clear()?;
     Ok(())
 }

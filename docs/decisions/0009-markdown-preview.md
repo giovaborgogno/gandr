@@ -39,3 +39,19 @@ Options considered:
   (j/k/g/G/Ctrl-d/u scroll it). Those, and source ↔ preview position mapping, are follow-ups.
 - Images referenced from Markdown show as `[img] alt` text for now.
 - DESIGN.md §4/§5 updated alongside this ADR.
+
+## Addendum — Mermaid diagrams
+```mermaid blocks are drawn as Unicode box diagrams by **`mermaid-text`** (pure Rust,
+plain `String` output, small deps; the same renderer md-tui uses), fitted to the pane via
+`render_with_width` and clipped (never wrapped, marked `…`) to it. A diagram it can't parse
+falls back to the highlighted source. Guards, since it runs on the UI thread:
+- Panics in the crate are contained (`panic_guard::contain`, with a hook filter so
+  ratatui's terminal-restoring panic hook stays quiet) and fall back to the source.
+- Layout is superlinear (~0.2s at 100 nodes, ~1.5s at 200, dev profile), so blocks over
+  100 non-blank lines show their source with a note.
+- Output is deterministic except `gantt` charts without explicit dates (the crate falls
+  back to today's date); its `chrono` `clock` feature is the crate's own, not ours. Considered and rejected for now: `merman`'s text
+renderer (falls back to a structured dump at pane widths) and an SVG → raster path through
+the M15 image pipeline (faithful, but heavy deps and needs terminal graphics). Known
+limitation: complex flowcharts (edges between subgraphs) and ER diagrams render
+approximately. New deps: `mermaid-text` (+ `ascii-dag`, `chrono`).

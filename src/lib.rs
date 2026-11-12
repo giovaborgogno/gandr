@@ -14,6 +14,7 @@ pub mod fuzzy;
 pub mod git;
 pub mod highlight;
 pub mod image_preview;
+pub mod panic_guard;
 pub mod review;
 pub mod search;
 pub mod testutil;

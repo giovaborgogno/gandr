@@ -237,9 +237,17 @@ half-block fallback. Raster now; SVG behind a feature flag. Sub-tasks:
 - [x] While the preview is shown, source-only keys (`/`, `]`/`[`, `Enter` fold, `v`/`y`) are
       swallowed; files over `MAX_PREVIEW_BYTES` (256 KB) show a notice instead of rendering
       on the UI thread.
+- [x] ```mermaid blocks drawn as Unicode box diagrams via `mermaid-text` (the renderer
+      md-tui uses), fitted to the pane width and clipped (`…`), never wrapped; unparseable
+      diagrams fall back to the highlighted source. Crate panics are contained
+      (`panic_guard`, quiet under ratatui's restoring hook); blocks over 100 lines show their
+      source with a note (layout is superlinear). Unit tests + a snapshot; fuzzed with
+      truncated real diagrams (no panics).
 - Follow-ups (backlog): render the preview off-thread (jobs/epoch, like M12 highlighting) and
   lift the size cap; map the source cursor ↔ preview position on toggle; `/` search inside
-  the preview; render images referenced by the Markdown (M15 pipeline).
+  the preview; render images referenced by the Markdown (M15 pipeline); higher-fidelity
+  Mermaid (complex flowcharts with subgraph-to-subgraph edges and ER diagrams render
+  approximately — an SVG → raster path through M15 would match GitHub).
 
 ## Backlog / later (not v1)
 

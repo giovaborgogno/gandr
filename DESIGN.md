@@ -72,7 +72,8 @@ uncommitted diff.
   per selection/terminal-resize, not per frame).
 - **Markdown files toggle to a rendered preview** (`m`) — headings, emphasis, lists and
   task boxes, blockquotes / GFM alerts, tables, rules, and fenced code (syntax-highlighted
-  with our syntect setup), word-wrapped to the pane. In the diff viewer it renders the file's
+  with our syntect setup; ```mermaid blocks drawn as Unicode box diagrams), word-wrapped to
+  the pane. In the diff viewer it renders the file's
   new version (the old one for a deletion); in the Repo browser, the open file. The mode is
   sticky across Markdown files and ignored by other files. Parsing/layout via `tui-markdown`
   (pulldown-cmark); see ADR 0009.

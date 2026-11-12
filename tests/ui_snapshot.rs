@@ -1597,6 +1597,22 @@ fn markdown_preview_in_files_tab() {
 }
 
 #[test]
+fn markdown_preview_draws_mermaid_diagrams() {
+    let fx = Fixture::new();
+    fx.write("notes.md", "old\n");
+    fx.commit("init");
+    fx.write(
+        "notes.md",
+        "# Flow\n\n```mermaid\nflowchart LR\n  A[Edit] --> B{Review}\n  B -->|ok| C[Merge]\n  B -->|changes| A\n```\n\nDone.\n",
+    );
+    let mut app = app_from(&fx);
+    app.handle_key(key('m'));
+    let out = frame(&app, 80, 24);
+    assert!(!out.contains("-->"), "mermaid source leaked:\n{out}");
+    insta::assert_snapshot!(out);
+}
+
+#[test]
 fn markdown_preview_scrolls_and_ignores_non_markdown() {
     let fx = Fixture::new();
     let body: String = (1..=60)

@@ -76,6 +76,9 @@ ratatui-image = { version = "11.0.6", default-features = false, features = [
 ] }
 tui-markdown = { version = "0.3.13", default-features = false }
 unicode-width = "0.2"
+# ```mermaid blocks in the Markdown preview, drawn as Unicode box text (the
+# renderer md-tui uses; pure Rust, deterministic). See ADR 0009.
+mermaid-text = "0.58"
 
 [dev-dependencies]
 # Snapshot testing of rendered TUI frames (see docs/testing.md)
