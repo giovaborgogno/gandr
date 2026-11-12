@@ -1559,3 +1559,72 @@ fn m3_multibyte_and_long_lines_render_without_panic() {
     let out = frame(&app, 24, 12);
     assert!(!out.is_empty());
 }
+
+// ---- M16: rendered Markdown preview (`m`) ----
+
+const README_V1: &str = "# gandr\n\nA viewer.\n";
+const README_V2: &str = "# gandr\n\nA **read-only** viewer for `git` diffs.\n\n## Features\n\n- delta-style rendering\n- side-by-side view\n  - with wrapping\n- [x] live watch\n\n> Built for reviewing agent changes.\n\n```rust\nfn main() {}\n```\n\n| key | action |\n|-----|--------|\n| m   | preview |\n";
+
+fn readme_fixture() -> Fixture {
+    let fx = Fixture::new();
+    fx.write("README.md", README_V1);
+    fx.commit("init");
+    fx.write("README.md", README_V2);
+    fx
+}
+
+#[test]
+fn markdown_preview_in_diff_tab() {
+    let fx = readme_fixture();
+    let mut app = app_from(&fx);
+    let source = frame(&app, 90, 32);
+    assert!(source.contains("+## Features") || source.contains("## Features"));
+    app.handle_key(key('m'));
+    let rendered = frame(&app, 90, 32);
+    insta::assert_snapshot!(rendered);
+    // `m` again flips back to the diff.
+    app.handle_key(key('m'));
+    assert_eq!(frame(&app, 90, 32), source);
+}
+
+#[test]
+fn markdown_preview_in_files_tab() {
+    let fx = readme_fixture();
+    let mut app = app_from(&fx);
+    app.handle_key(key('2')); // Repo tab, README.md revealed + opened
+    app.handle_key(key('m'));
+    insta::assert_snapshot!(frame(&app, 90, 32));
+}
+
+#[test]
+fn markdown_preview_scrolls_and_ignores_non_markdown() {
+    let fx = Fixture::new();
+    let body: String = (1..=60)
+        .map(|i| format!("Paragraph number {i}.\n\n"))
+        .collect();
+    fx.write("doc.md", "old\n");
+    fx.write("z.rs", "fn a() {}\n");
+    fx.commit("init");
+    fx.write("doc.md", &body);
+    fx.write("z.rs", "fn a() { 1 }\n");
+    let mut app = app_from(&fx);
+    // Files are listed doc.md first; preview it and jump to the bottom.
+    app.handle_key(key('m'));
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    app.handle_key(key('G'));
+    let bottom = frame(&app, 80, 20);
+    assert!(bottom.contains("Paragraph number 60."), "{bottom}");
+    assert!(!bottom.contains("Paragraph number 1."), "{bottom}");
+    app.handle_key(key('g'));
+    assert!(frame(&app, 80, 20).contains("Paragraph number 1."));
+    // Source-only keys can't act on the hidden diff while the preview is shown.
+    app.handle_key(key('/'));
+    assert!(app.search().is_none(), "`/` must not open a hidden search");
+    // A non-Markdown file ignores the (sticky) preview mode and shows its diff.
+    app.handle_key(key('n'));
+    let rs = frame(&app, 80, 20);
+    assert!(
+        rs.contains("fn a() { 1 }") && !rs.contains("rendered"),
+        "{rs}"
+    );
+}

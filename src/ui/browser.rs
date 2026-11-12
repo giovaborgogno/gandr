@@ -104,6 +104,11 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
     if let Some(title) = &title {
         block = block.title(title.clone());
     }
+    let preview = app.markdown_preview_active();
+    if preview {
+        block =
+            block.title(Line::from(vec![super::markdown_badge(), Span::raw(" ")]).right_aligned());
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -124,6 +129,24 @@ fn render_content(app: &App, f: &mut Frame, area: Rect) {
             None => "Binary file.".to_string(),
         };
         f.render_widget(Paragraph::new(text), inner);
+        return;
+    }
+
+    // Rendered Markdown preview (`m`) instead of the highlighted source.
+    if preview {
+        let rel = loaded
+            .path
+            .strip_prefix(&app.context().root)
+            .unwrap_or(&loaded.path);
+        super::render_markdown_preview(
+            app,
+            f,
+            inner,
+            rel,
+            super::content_hash(&loaded.lines),
+            loaded.lines.iter().map(|l| l.len() + 1).sum(),
+            || loaded.lines.join("\n"),
+        );
         return;
     }
 

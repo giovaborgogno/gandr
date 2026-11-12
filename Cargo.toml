@@ -74,6 +74,8 @@ tempfile = "3"
 ratatui-image = { version = "11.0.6", default-features = false, features = [
     "crossterm",
 ] }
+tui-markdown = { version = "0.3.13", default-features = false }
+unicode-width = "0.2"
 
 [dev-dependencies]
 # Snapshot testing of rendered TUI frames (see docs/testing.md)

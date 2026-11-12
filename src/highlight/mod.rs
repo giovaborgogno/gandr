@@ -78,6 +78,13 @@ impl Highlighter {
         Self { syntax, mode }
     }
 
+    /// Resolve the syntax for a language token (a Markdown fence info string such
+    /// as `rust`, `py`, `bash`), matching names and extensions. `None` if unknown.
+    pub fn for_token(token: &str, mode: ThemeMode) -> Option<Self> {
+        let syntax = syntaxes().find_syntax_by_token(token)?;
+        Some(Self { syntax, mode })
+    }
+
     /// Foreground spans for one line, highlighted in isolation (no carried
     /// state) — multi-line constructs aren't tracked. The diff and Files viewers
     /// use [`Highlighter::highlight_file`] instead; this single-line primitive

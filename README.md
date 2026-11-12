@@ -97,6 +97,7 @@ Press `2` for the **Repo** browser, `1` to go back to the **Diff** reviewer.
 | `n`/`p` | next / previous file · `]`/`[` next / previous hunk |
 | `h`/`l`, `←`/`→` | enter / exit file · collapse / expand directory · `Enter` open / expand fold |
 | `s` · `w` · `o` | side-by-side · word highlight · expand context |
+| `m` | Markdown files: rendered preview ⇄ source (both tabs) |
 | `Space` | mark file reviewed |
 | `c` · `b` | compare menu · branch/tag picker |
 | `/` (then `n`/`N`) | find in the current view (the diff, or the open file) |

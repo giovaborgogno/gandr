@@ -4,6 +4,7 @@
 //! with no I/O, so they're snapshot-testable on `TestBackend` (see docs/testing.md).
 
 pub mod browser;
+pub mod markdown;
 pub mod tree;
 pub mod viewer_split;
 pub mod viewer_unified;
@@ -44,6 +45,25 @@ const KEYBAR_FILES: &[(&str, &str)] = &[
     ("?", "help"),
 ];
 
+/// Keybar variants while a Markdown file is open: `m` (preview) replaces a
+/// less essential hint so the line still fits a half-width terminal.
+const KEYBAR_MD: &[(&str, &str)] = &[
+    ("n/p", "file"),
+    ("]/[", "hunk"),
+    ("Space", "review"),
+    ("m", "preview"),
+    ("/", "find"),
+    ("?", "help"),
+];
+const KEYBAR_FILES_MD: &[(&str, &str)] = &[
+    ("Enter", "open"),
+    ("h/l", "in/out"),
+    ("m", "preview"),
+    ("f/F", "finder"),
+    ("v/y", "copy"),
+    ("?", "help"),
+];
+
 /// Build the styled keybar line: keys highlighted, labels dim.
 fn keybar_hints(items: &'static [(&'static str, &'static str)]) -> Line<'static> {
     let mut spans = Vec::with_capacity(items.len() * 3);
@@ -63,6 +83,59 @@ fn keybar_hints(items: &'static [(&'static str, &'static str)]) -> Line<'static>
         ));
     }
     Line::from(spans)
+}
+
+/// Draw the rendered Markdown preview (M16) of `path` into `area`: a one-column
+/// left margin, the laid-out lines from the app's cache, and a scrollbar.
+/// `hash` identifies the content and `len` is its size in bytes; `source` builds
+/// the text only on a cache miss.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_markdown_preview(
+    app: &App,
+    f: &mut Frame,
+    area: Rect,
+    path: &std::path::Path,
+    hash: u64,
+    len: usize,
+    source: impl FnOnce() -> String,
+) {
+    // Leave a column on each side: a margin on the left, the scrollbar on the right.
+    let content = Rect {
+        x: area.x.saturating_add(1),
+        width: area.width.saturating_sub(2),
+        ..area
+    };
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    if len > crate::ui::markdown::MAX_PREVIEW_BYTES {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!(
+                    "Too large to render ({} KB > {} KB). Press m for the source.",
+                    len / 1024,
+                    crate::ui::markdown::MAX_PREVIEW_BYTES / 1024
+                ),
+                Style::default().fg(Color::DarkGray),
+            )),
+            content,
+        );
+        return;
+    }
+    let lines = app.markdown_lines(path, hash, content.width, source);
+    let height = content.height as usize;
+    let top = app.markdown_scroll(path, lines.len(), height);
+    let visible: Vec<Line> = lines.iter().skip(top).take(height).cloned().collect();
+    f.render_widget(Paragraph::new(visible), content);
+    render_scrollbar(f, area, lines.len(), top);
+}
+
+/// A stable content hash for the Markdown preview cache key.
+pub(crate) fn content_hash<T: std::hash::Hash + ?Sized>(content: &T) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::hash::DefaultHasher::new();
+    content.hash(&mut h);
+    h.finish()
 }
 
 /// Draw a vertical scrollbar on the right edge of `area` for `total` rows at `pos`.
@@ -488,9 +561,11 @@ fn keybar_line(app: &App) -> Line<'static> {
             format!("⚠ {err}"),
             Style::default().fg(Color::Red),
         )),
-        (None, None) => match app.tab() {
-            Tab::Diff => keybar_hints(KEYBAR),
-            Tab::Files => keybar_hints(KEYBAR_FILES),
+        (None, None) => match (app.tab(), app.markdown_target().is_some()) {
+            (Tab::Diff, false) => keybar_hints(KEYBAR),
+            (Tab::Files, false) => keybar_hints(KEYBAR_FILES),
+            (Tab::Diff, true) => keybar_hints(KEYBAR_MD),
+            (Tab::Files, true) => keybar_hints(KEYBAR_FILES_MD),
         },
     }
 }
@@ -518,6 +593,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         ("r / a", "refresh · auto-refresh"),
         ("1 / 2", "Diff / Files tab"),
         ("z", "hide / show the tree panel"),
+        ("m", "Markdown: rendered preview ⇄ source"),
         ("? / q", "help · quit"),
     ];
 
@@ -728,6 +804,26 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
         return;
     }
 
+    // Rendered Markdown preview (`m`): the file's new version (old for a
+    // deletion) laid out as a document instead of the diff.
+    if app.markdown_preview_active() {
+        let text = if file.change.status == crate::git::Status::Deleted {
+            &file.old_text
+        } else {
+            &file.new_text
+        };
+        render_markdown_preview(
+            app,
+            f,
+            diff_body,
+            &file.change.path,
+            content_hash(text.as_str()),
+            text.len(),
+            || text.clone(),
+        );
+        return;
+    }
+
     let mode = app.theme_mode();
     let palette = Palette::for_mode(mode);
     let word_on = app.config().word_diff;
@@ -789,7 +885,7 @@ fn render_viewer(app: &App, f: &mut Frame, area: Rect) {
 fn file_header_line<'a>(app: &App, file: &'a FileDiff) -> Paragraph<'a> {
     let path = file.change.path.to_string_lossy().into_owned();
     let pos = format!("[{}/{}]", app.selected() + 1, app.files().len());
-    Paragraph::new(Line::from(vec![
+    let mut spans = vec![
         Span::styled(path, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
@@ -798,5 +894,20 @@ fn file_header_line<'a>(app: &App, file: &'a FileDiff) -> Paragraph<'a> {
         ),
         Span::raw("  "),
         Span::styled(pos, Style::default().fg(Color::DarkGray)),
-    ]))
+    ];
+    if app.markdown_preview_active() {
+        spans.push(Span::raw("  "));
+        spans.push(markdown_badge());
+    }
+    Paragraph::new(Line::from(spans))
+}
+
+/// The "rendered" badge shown in a pane header while the Markdown preview is on.
+pub(crate) fn markdown_badge() -> Span<'static> {
+    Span::styled(
+        "◆ rendered (m: source)",
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
+    )
 }

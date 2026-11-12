@@ -12,3 +12,4 @@ consequences. Add a new numbered file to change a decision; don't edit history, 
 - [0006](0006-shared-core-and-perf-consolidation.md) — shared core + performance consolidation
 - [0007](0007-search-scopes-slash-and-finder.md) — search scopes: `/` in-view, `f`/`F` finder
 - [0008](0008-image-preview.md) — image preview via `ratatui-image` (protocol + halfblocks)
+- [0009](0009-markdown-preview.md) — rendered Markdown preview via `tui-markdown` (not `md-tui`)

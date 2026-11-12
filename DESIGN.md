@@ -70,6 +70,12 @@ uncommitted diff.
   half-block fallback that works everywhere, via `ratatui-image` (see ADR 0008). Decoding
   runs off the render thread; the resize to the pane is cached per area (so it happens once
   per selection/terminal-resize, not per frame).
+- **Markdown files toggle to a rendered preview** (`m`) — headings, emphasis, lists and
+  task boxes, blockquotes / GFM alerts, tables, rules, and fenced code (syntax-highlighted
+  with our syntect setup), word-wrapped to the pane. In the diff viewer it renders the file's
+  new version (the old one for a deletion); in the Repo browser, the open file. The mode is
+  sticky across Markdown files and ignored by other files. Parsing/layout via `tui-markdown`
+  (pulldown-cmark); see ADR 0009.
 - Other binary files (and images when disabled, undetectable, or over the size cap) render
   a placeholder ("binary file, N bytes").
 
@@ -89,6 +95,7 @@ uncommitted diff.
 | `Enter` / `→` `←` | expand / collapse tree node |
 | `s` | toggle unified ↔ side-by-side |
 | `w` | toggle word-level highlight |
+| `m` | Markdown: rendered preview ⇄ source (j/k/g/G/Ctrl-d/u scroll the preview) |
 | `c` | open compare picker |
 | `Space` | mark file reviewed |
 | `o` | collapse / expand file or context block |

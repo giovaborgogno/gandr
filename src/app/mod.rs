@@ -198,6 +198,19 @@ pub struct App {
     /// respawning and CPU pile-up), and a monotonic token so stale results drop.
     image_requested: Option<(jobs::ImageKey, Size)>,
     image_epoch: u64,
+    /// Rendered Markdown preview (M16, `m`): when on, a Markdown file shows its
+    /// rendered form instead of the source/diff. Sticky across files — it applies
+    /// to whichever Markdown file is open, and non-Markdown files ignore it.
+    md_preview: bool,
+    /// Top row of the rendered preview. A `Cell` so `render` can clamp it to the
+    /// laid-out length (only known once the pane width is).
+    md_scroll: Cell<usize>,
+    /// Preview height from the last render (for half-page scrolling).
+    md_viewport: Cell<usize>,
+    /// The file the preview was last rendered for; a different file resets the scroll.
+    md_scroll_path: RefCell<Option<PathBuf>>,
+    /// Cached rendered lines, keyed by (file, content hash, width, theme).
+    md_cache: RefCell<MarkdownCache>,
     /// In-diff text search state (open when `Some`).
     search: Option<Search>,
     /// The fuzzy ref-picker overlay, when open.
@@ -271,6 +284,14 @@ struct DiffHighlight {
 struct DisplayRows {
     key: Option<(PathBuf, usize, u64)>,
     rows: Rc<Vec<DiffRow>>,
+}
+
+/// Cached rendered Markdown preview lines (M16) and the key they were laid out
+/// for: (file, content hash, pane width, theme).
+#[derive(Default)]
+struct MarkdownCache {
+    key: Option<(PathBuf, u64, u16, ThemeMode)>,
+    lines: Rc<Vec<ratatui::text::Line<'static>>>,
 }
 
 /// How many decoded image previews to keep cached (LRU). Small — just enough
@@ -356,6 +377,11 @@ impl App {
             image_wanted_area: Cell::new(None),
             image_requested: None,
             image_epoch: 0,
+            md_preview: false,
+            md_scroll: Cell::new(0),
+            md_viewport: Cell::new(0),
+            md_scroll_path: RefCell::new(None),
+            md_cache: RefCell::new(MarkdownCache::default()),
             search: None,
             ref_picker: None,
             repo_search: None,
@@ -429,6 +455,97 @@ impl App {
     }
     pub fn browser(&self) -> &Browser {
         &self.browser
+    }
+
+    // ---- rendered Markdown preview (M16) ----
+
+    /// The Markdown file the active tab is showing, if it can be previewed
+    /// (a text file with a Markdown extension), as a path relative to the root.
+    pub fn markdown_target(&self) -> Option<PathBuf> {
+        match self.tab {
+            Tab::Diff => self
+                .current()
+                .filter(|f| !f.change.is_binary)
+                .map(|f| f.change.path.clone())
+                .filter(|p| ui::markdown::is_markdown_path(p)),
+            Tab::Files => self
+                .browser
+                .loaded()
+                .filter(|l| !l.binary && !l.too_large)
+                .filter(|l| ui::markdown::is_markdown_path(&l.path))
+                .map(|l| {
+                    l.path
+                        .strip_prefix(&self.context.root)
+                        .unwrap_or(&l.path)
+                        .to_path_buf()
+                }),
+        }
+    }
+
+    /// Whether the rendered Markdown preview replaces the source view right now.
+    pub fn markdown_preview_active(&self) -> bool {
+        self.md_preview && self.markdown_target().is_some()
+    }
+
+    /// Rendered preview lines for `path` at `width`, from the cache when the
+    /// content (by `hash`), width, and theme are unchanged; `source` builds the
+    /// Markdown text only on a miss.
+    pub fn markdown_lines(
+        &self,
+        path: &Path,
+        hash: u64,
+        width: u16,
+        source: impl FnOnce() -> String,
+    ) -> Rc<Vec<ratatui::text::Line<'static>>> {
+        let key = (path.to_path_buf(), hash, width, self.theme_mode);
+        let mut cache = self.md_cache.borrow_mut();
+        if cache.key.as_ref() != Some(&key) {
+            cache.lines = Rc::new(ui::markdown::render(&source(), width, self.theme_mode));
+            cache.key = Some(key);
+        }
+        Rc::clone(&cache.lines)
+    }
+
+    /// The preview's top row for `path`, clamped so the last screenful stays
+    /// full. A different file than last render starts at the top. Records the
+    /// viewport height for half-page scrolling.
+    pub fn markdown_scroll(&self, path: &Path, total: usize, height: usize) -> usize {
+        {
+            let mut last = self.md_scroll_path.borrow_mut();
+            if last.as_deref() != Some(path) {
+                *last = Some(path.to_path_buf());
+                self.md_scroll.set(0);
+            }
+        }
+        self.md_viewport.set(height);
+        let top = self.md_scroll.get().min(total.saturating_sub(height));
+        self.md_scroll.set(top);
+        top
+    }
+
+    /// Scroll keys while the rendered preview is focused. Returns whether the
+    /// key was consumed. Line-oriented keys that only make sense on the source
+    /// (visual selection) are swallowed so they can't act on hidden lines.
+    fn markdown_scroll_key(&mut self, key: KeyEvent, ctrl: bool) -> bool {
+        let half = (self.md_viewport.get() / 2).max(1);
+        let cur = self.md_scroll.get();
+        let next = match key.code {
+            KeyCode::Char('j') | KeyCode::Down => cur.saturating_add(1),
+            KeyCode::Char('k') | KeyCode::Up => cur.saturating_sub(1),
+            KeyCode::Char('d') if ctrl => cur.saturating_add(half),
+            KeyCode::Char('u') if ctrl => cur.saturating_sub(half),
+            KeyCode::PageDown => cur.saturating_add(self.md_viewport.get().max(1)),
+            KeyCode::PageUp => cur.saturating_sub(self.md_viewport.get().max(1)),
+            KeyCode::Char('g') => 0,
+            // Clamped to the real last screenful at the next render.
+            KeyCode::Char('G') => usize::MAX,
+            _ => return false,
+        };
+        // Pin the scroll to this file so the next render doesn't treat it as a
+        // freshly opened one (which would reset it to the top).
+        *self.md_scroll_path.borrow_mut() = self.markdown_target();
+        self.md_scroll.set(next);
+        true
     }
 
     /// The comparison key under which review state is stored.
@@ -2293,6 +2410,12 @@ impl App {
                 }
                 return;
             }
+            // Rendered Markdown preview ⇄ source (only on a Markdown file; the
+            // mode then sticks for other Markdown files you open).
+            KeyCode::Char('m') if self.picker.is_none() && self.markdown_target().is_some() => {
+                self.md_preview = !self.md_preview;
+                return;
+            }
             // Toggle the tree/list panel to give the diff/content the full width.
             KeyCode::Char('z') => {
                 self.show_tree = !self.show_tree;
@@ -2321,6 +2444,28 @@ impl App {
                 return;
             }
             _ => {}
+        }
+
+        // While the rendered Markdown preview is shown, keys that act on the
+        // hidden source (find, hunk jumps, fold expand, selection/copy) are
+        // swallowed so they can't change state you can't see.
+        if self.picker.is_none()
+            && self.markdown_preview_active()
+            && matches!(
+                key.code,
+                KeyCode::Char('/' | ']' | '[' | 'v' | 'y') | KeyCode::Enter
+            )
+            && !(key.code == KeyCode::Enter && self.focus == Focus::Tree)
+        {
+            return;
+        }
+        // While the rendered Markdown preview is focused, scroll keys move it.
+        if self.focus == Focus::Diff
+            && self.picker.is_none()
+            && self.markdown_preview_active()
+            && self.markdown_scroll_key(key, ctrl)
+        {
+            return;
         }
 
         if self.tab == Tab::Files {

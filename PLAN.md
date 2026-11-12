@@ -221,6 +221,26 @@ half-block fallback. Raster now; SVG behind a feature flag. Sub-tasks:
 - [ ] **M15e — Modified images before/after (optional).** Reuse the side-by-side split
       (M4) to show old vs. new for a changed image, not just the new one.
 
+### M16 — Rendered Markdown preview (see ADR 0009) ✅
+- [x] `m` toggles a Markdown file (`.md`/`.markdown`/`.mdx`/…) between source and a rendered
+      preview, in both the Diff tab (new version; old for a deletion) and the Repo browser.
+      Sticky across Markdown files; non-Markdown files ignore it. Pane header shows a
+      `◆ rendered` badge; the keybar shows `m preview` on Markdown files.
+- [x] `src/ui/markdown.rs` (render-pure): `tui-markdown` (no default features → no oniguruma)
+      with a light/dark style sheet; word wrap with hanging indents; `•◦▪`/`☐☑` markers;
+      H1/H2 underline rules; full-width `─` thematic breaks; fenced code highlighted via
+      `Highlighter::for_token` over a padded code background; tables sized to the pane.
+- [x] Rendered lines cached per (file, content hash, width, theme); preview scroll clamps at
+      render and resets when another file is opened.
+- [x] Tests: markdown unit tests (markers, wrap, code fences, width bounds) + snapshots of
+      both tabs + a scroll / non-Markdown-ignores-mode test. `html_render -- markdown [light]`.
+- [x] While the preview is shown, source-only keys (`/`, `]`/`[`, `Enter` fold, `v`/`y`) are
+      swallowed; files over `MAX_PREVIEW_BYTES` (256 KB) show a notice instead of rendering
+      on the UI thread.
+- Follow-ups (backlog): render the preview off-thread (jobs/epoch, like M12 highlighting) and
+  lift the size cap; map the source cursor ↔ preview position on toggle; `/` search inside
+  the preview; render images referenced by the Markdown (M15 pipeline).
+
 ## Backlog / later (not v1)
 
 - ~~**Branch/ref picker**~~ — done in M9 (`b` opens a fuzzy picker over branches +
